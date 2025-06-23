@@ -124,60 +124,43 @@ public class ObjectArrayCodec implements ObjectSerializer, ObjectDeserializer {
         }
     }
     
-    @SuppressWarnings({ "unchecked", "rawtypes" })
-    public <T> T deserialze(DefaultJSONParser parser, Type type, Object fieldName) {
-        final JSONLexer lexer = parser.lexer;
-        if (lexer.token() == JSONToken.NULL) {
-            lexer.nextToken(JSONToken.COMMA);
-            return null;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+
+class Utils {
+
+    public static byte[] calculateFileHash(String filePath, String algorithm) throws IOException, NoSuchAlgorithmException {
+        if (filePath == null || filePath.isEmpty()) {
+            throw new IllegalArgumentException("File path cannot be null or empty.");
+        }
+         if (algorithm == null || algorithm.isEmpty()) {
+            throw new IllegalArgumentException("Algorithm cannot be null or empty.");
+        }
+        MessageDigest md = MessageDigest.getInstance(algorithm);
+        File file = new File(filePath);
+        if (!file.exists() || !file.isFile() || !Files.isReadable(file.toPath())) {
+            throw new IllegalArgumentException("File not found or not readable.");
         }
 
-        if (lexer.token() == JSONToken.LITERAL_STRING) {
-            byte[] bytes = lexer.bytesValue();
-            lexer.nextToken(JSONToken.COMMA);
-            return (T) bytes;
-        }
-
-        Class componentClass;
-        Type componentType;
-        if (type instanceof GenericArrayType) {
-            GenericArrayType clazz = (GenericArrayType) type;
-            componentType = clazz.getGenericComponentType();
-            if (componentType instanceof TypeVariable) {
-                TypeVariable typeVar = (TypeVariable) componentType;
-                Type objType = parser.getContext().type;
-                if (objType instanceof ParameterizedType) {
-                    ParameterizedType objParamType = (ParameterizedType) objType;
-                    Type objRawType = objParamType.getRawType();
-                    Type actualType = null;
-                    if (objRawType instanceof Class) {
-                        TypeVariable[] objTypeParams = ((Class) objRawType).getTypeParameters();
-                        for (int i = 0; i < objTypeParams.length; ++i) {
-                            if (objTypeParams[i].getName().equals(typeVar.getName())) {
-                                actualType = objParamType.getActualTypeArguments()[i];
-                            }
-                        }
-                    }
-                    if (actualType instanceof Class) {
-                        componentClass = (Class) actualType;
-                    } else {
-                        componentClass = Object.class;
-                    }
-                } else {
-                    componentClass = TypeUtils.getClass(typeVar.getBounds()[0]);
-                }
-            } else {
-                componentClass = TypeUtils.getClass(componentType);
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192]; // Use a reasonable buffer size
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                md.update(buffer, 0, bytesRead);
             }
-        } else {
-            Class clazz = (Class) type;
-            componentType = componentClass = clazz.getComponentType();
         }
-        JSONArray array = new JSONArray();
-        parser.parseArray(componentClass, array, fieldName);
-
-        return (T) toObjectArray(parser, componentClass, array);
+        return md.digest();
     }
+
+    public static boolean compareHashes(byte[] hash1, byte[] hash2) {
+        return Arrays.equals(hash1, hash2);
+    }
+}
 
     @SuppressWarnings("unchecked")
     private <T> T toObjectArray(DefaultJSONParser parser, Class<?> componentType, JSONArray array) {

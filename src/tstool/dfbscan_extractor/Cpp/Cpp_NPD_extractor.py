@@ -1,12 +1,15 @@
-from tstool.analyzer.TS_analyzer import *
-from tstool.analyzer.Cpp_TS_analyzer import *
-from ..dfbscan_extractor import *
 import tree_sitter
 import argparse
 
+from src.tstool.analyzer.TS_analyzer import find_nodes_by_type
+from src.tstool.analyzer.Cpp_TS_analyzer import Cpp_TSAnalyzer
+from src.tstool.dfbscan_extractor.dfbscan_extractor import DFBScanExtractor
+from src.memory.syntactic.function import Function
+from src.memory.syntactic.value import Value, ValueLabel
+
 
 class Cpp_NPD_Extractor(DFBScanExtractor):
-    def extract_sources(self, function: Function) -> List[Value]:
+    def extract_sources(self, function: Function) -> list[Value]:
         root_node = function.parse_tree_root_node
         source_code = self.ts_analyzer.code_in_files[function.file_path]
         file_path = function.file_path
@@ -43,7 +46,7 @@ class Cpp_NPD_Extractor(DFBScanExtractor):
                 sources.append(Value(name, line_number, ValueLabel.SRC, file_path))
         return sources
 
-    def extract_sinks(self, function: Function) -> List[Value]:
+    def extract_sinks(self, function: Function) -> list[Value]:
         """
         Extract the sinks that can cause the null pointer derferences from C/C++ programs.
         :param: function: Function object.

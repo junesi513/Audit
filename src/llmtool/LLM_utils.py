@@ -9,6 +9,7 @@ import os
 import concurrent.futures
 from functools import partial
 import threading
+from dataclasses import dataclass
 
 import json
 from ui.logger import Logger
@@ -117,3 +118,35 @@ class LLM:
             time.sleep(2)
 
         return ""
+
+@dataclass
+class LLMResponse:
+    text: str
+    
+    def get_text(self):
+        return self.text
+
+class Prompt:
+    def __init__(self, **kwargs):
+        self.prompt_path = kwargs.get('prompt_path')
+        self.model_name = kwargs.get('model_name')
+        self.api_key = kwargs.get('api_key')
+        self.logger = kwargs.get('logger')
+        self.language = kwargs.get('language')
+        
+        with open(self.prompt_path, 'r') as f:
+            self.prompt_data = json.load(f)
+
+        self.llm = LLM(
+            model_name=self.model_name,
+            temperature=0.5, # Default temperature
+            system_role=self.prompt_data.get("system_role", ""),
+            logger=self.logger
+        )
+    
+    def get_user_prompt(self, **kwargs):
+        return self.prompt_data["question_template"].format(**kwargs)
+
+    def run(self, user_prompt: str) -> LLMResponse:
+        response_text, _, _ = self.llm.infer(user_prompt, is_measure_cost=True)
+        return LLMResponse(text=response_text)

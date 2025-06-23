@@ -26,23 +26,18 @@ class BugReport:
         return
 
     def to_dict(self) -> dict:
+        # Assuming there is at least one relevant function, which should be the case.
+        first_func_id = next(iter(self.relevant_functions))
+        first_func = self.relevant_functions[first_func_id]
+
         return {
             "bug_type": self.bug_type,
+            "file_path": first_func.file_path,
+            "function_name": first_func.function_name,
+            "function_code": first_func.function_code,
+            "start_line": first_func.start_line_number,
+            "end_line": first_func.end_line_number,
             "buggy_value": str(self.buggy_value),
-            "relevant_functions": [
-                [
-                    self.relevant_functions[function_id].file_path
-                    for function_id in self.relevant_functions
-                ],
-                [
-                    self.relevant_functions[function_id].function_name
-                    for function_id in self.relevant_functions
-                ],
-                [
-                    self.relevant_functions[function_id].function_code
-                    for function_id in self.relevant_functions
-                ],
-            ],
             "explanation": self.explanation,
             "is_human_confirmed_true": (
                 str(self.is_human_confirmed_true)

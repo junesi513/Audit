@@ -5,12 +5,12 @@ import tree_sitter
 
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
-from .TS_analyzer import *
+from src.tstool.analyzer.TS_analyzer import *
 from memory.syntactic.function import *
 from memory.syntactic.value import *
 
 
-class Java_TSAnalyzer(TSAnalyzer):
+class JavaTSAnalyzer(TSAnalyzer):
     """
     TSAnalyzer for Java source files using tree-sitter.
     Implements Java-specific parsing and analysis.
