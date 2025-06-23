@@ -3,7 +3,7 @@ from os import path
 from pathlib import Path
 import copy
 import concurrent.futures
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Dict, Set, Optional
 from abc import ABC, abstractmethod
 
 import tree_sitter
@@ -159,6 +159,9 @@ class TSAnalyzer(ABC):
             raise ValueError("Invalid language setting")
         self.parser.set_language(self.language)
 
+        # Add a dictionary to store parsed trees
+        self.parse_trees: Dict[str, tree_sitter.Tree] = {}
+
         # Results of parsing
         self.functionRawDataDic = {}
         self.functionNameToId = {}
@@ -191,6 +194,8 @@ class TSAnalyzer(ABC):
         """
         try:
             tree = self.parser.parse(bytes(source_code, "utf8"))
+            # Store the parsed tree
+            self.parse_trees[file_path] = tree
         except Exception as e:
             print(self.parser)
             print(f"Error parsing {file_path}: {e}")
@@ -202,7 +207,7 @@ class TSAnalyzer(ABC):
 
     def _analyze_single_function(
         self, function_id: int, raw_data: Tuple
-    ) -> Tuple[int, "Function"]:
+    ) -> Optional[Tuple[int, "Function"]]:
         """
         Helper function to analyze a single function.
         """
@@ -220,7 +225,9 @@ class TSAnalyzer(ABC):
             file_name,
         )
         current_function = self.extract_meta_data_in_single_function(current_function)
-        return function_id, current_function
+        if current_function:
+            return function_id, current_function
+        return None
 
     def parse_project(self) -> None:
         """
@@ -256,8 +263,12 @@ class TSAnalyzer(ABC):
                 futures[future] = function_id
 
             for future in concurrent.futures.as_completed(futures):
-                func_id, current_function = future.result()
-                self.function_env[func_id] = current_function
+                result = future.result()
+                
+                if result:
+                    function_id, current_function = result
+                    if current_function:
+                        self.function_env[function_id] = current_function
                 pbar.update(1)
             pbar.close()
         return
@@ -281,7 +292,10 @@ class TSAnalyzer(ABC):
                 )
                 futures[future] = function_id
             for future in concurrent.futures.as_completed(futures):
-                # Optionally, process or log each completed task here.
+                result = future.result()
+                if result:
+                    function_id, current_function = result
+                    self.function_env[function_id] = current_function
                 pbar.update(1)
             pbar.close()
         return
@@ -509,8 +523,8 @@ class TSAnalyzer(ABC):
         """
         callee_list = []
         for callee_api_id in self.function_caller_api_callee_map[function.function_id]:
-            if self.api_env[callee_list] == API(-1, callee_name, para_num):
-                callee_list.append(self.api_env[callee_list])
+            if self.api_env[callee_api_id] == API(-1, callee_name, para_num):
+                callee_list.append(self.api_env[callee_api_id])
         return callee_list
 
     @abstractmethod

@@ -1,0 +1,18 @@
+rules:
+  - id: cwe-20-improper-validation-vul4j-1-dataflow
+    message: "A potential CWE-20 vulnerability was detected. A tainted 'componentClass' that has lost type precision is passed to 'parser.parseArray'. The taint originates from a cast within the 'else' block of a 'GenericArrayType' check."
+    severity: WARNING
+    languages:
+      - java
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern-inside: |
+              if ($TYPE instanceof GenericArrayType) { ... }
+              else {
+                $CLASS = (Class<?>) $TYPE;
+                ...
+              }
+          - pattern: $CLASS.getComponentType()
+    pattern-sinks:
+      - pattern: $PARSER.parseArray($SINK, ...) 

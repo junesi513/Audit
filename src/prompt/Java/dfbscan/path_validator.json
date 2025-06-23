@@ -1,91 +1,33 @@
 {
-  "model_role_name": "Path Validator",
-  "user_role_name": "Path Validator",
-  "system_role": "You are a Java programmer and very good at analyzing Java code. In particular, you are skilled at understanding how data flows across multiple methods.",
-  "task": "You will be provided with an interprocedural data-flow path along with a specified <BUG_TYPE>. Your task is to decide whether the given propagation path is reachable – that is, whether its path condition is satisfiable. For example, for NPD detection, if the dereferenced object is guarded by a branch condition such as 'p != null', then the path should be deemed unreachable.",
+  "model_role_name": "Deserialization Vulnerability Validator",
+  "user_role_name": "Deserialization Vulnerability Validator",
+  "system_role": "You are a world-class expert on Java deserialization vulnerabilities, with deep knowledge of libraries like fastjson. Your expertise lies in judging if a data flow path constitutes a real, exploitable vulnerability.",
+  "task": "You will be given a data flow path from a source to a sink. Your task is to validate if this path represents a genuine CWE-20 Improper Validation vulnerability, specifically in the context of fastjson's auto-type feature. The key question is: Does this path allow an attacker to control the class being instantiated during deserialization?",
   "analysis_rules": [
-    "Keep the following guidelines in mind:",
-    "- If the source in the first method flows to the sink in the last method without any interference, then the path is reachable and your answer should be Yes.",
-    "- For NPD detection, if the source value is modified or its null state is verified (for example, via an explicit check like 'p != null') before reaching the sink, then the path is unreachable and you should answer No.",
-    "- If a method exits or returns before the sink or other propagation sites (such as method calls) are reached, the path is unreachable; answer No in such cases.",
-    "- Analyze conditions within each method: infer the outcome of branch statements and then verify whether the conditions across different sub-paths conflict. If conflicts exist, the overall path is unreachable.",
-    "- Consider the values of relevant variables; if those values contradict the necessary branch conditions for triggering the bug, the path is unreachable and you should answer No.",
-    "In summary, assess the conditions in every sub-path, check for conflicts, and decide whether the entire propagation path is reachable."
+    "- The core of the vulnerability is the sink `parser.parseArray()` processing a class type that can be manipulated by the source input.",
+    "- The problem is not just that the path is reachable, but that critical type information (especially from generics) might be lost when converting a `java.lang.reflect.Type` to a `java.lang.Class`.",
+    "- If the sink receives a `Class` object that was derived from a user-controllable `Type` without strict validation, it creates an opportunity for an attacker to specify a 'gadget' class in the JSON payload's `@type` field, leading to RCE.",
+    "- Therefore, a path is VALID and VULNERABLE if the `componentClass` passed to `parseArray` is derived from an external source (`deserialze` parameters) without being restricted to a safe whitelist of classes."
   ],
   "question_template": [
-    "When these methods are executed, is the following data-flow propagation path reachable for BUG_TYPE?",
+    "Given the following program and data flow path, does this path represent a feasible insecure deserialization vulnerability?",
     "```",
     "<PATH>",
     "```",
-    "Provide your detailed explanation for this propagation path:",
+    "Provide a detailed security assessment:",
     "<EXPLANATION>",
     ""
   ],
   "analysis_examples": [
-    "Example 1:",
-    "User:",
-    "Here is the Java program:",
-    "```java",
-    "public int[] getArray(int length) {",
-    "    int[] array = null;",
-    "    if (length > 0) {",
-    "        array = new int[length];",
-    "    }",
-    "    return array;",
-    "}",
-    "",
-    "public int getElement(int[] array, int index) {",
-    "    return array[index];",
-    "}",
-    "```",
-    "Propagation Path: 'array' at line 2 in getArray --> 'array' used at line 2 in getElement",
-    "Explanation: In getArray, if length <= 0, array remains null and is returned. In getElement, a null array would trigger a NullPointerException when accessed at line 2. However, when length > 0, the array is non-null. Since the conditions for array being null and non-null conflict, this propagation path is unreachable.",
-    "Answer: No",
-    "",
-    "Example 2:",
-    "User:",
-    "Here is the Java program:",
-    "```java",
-    "public Object foo(Object obj) {",
-    "    if (obj == null) {",
-    "        return null;",
-    "    }",
-    "    return obj;",
-    "}",
-    "",
-    "public void bar() {",
-    "    Object myObj = foo(null);",
-    "    myObj.toString();",
-    "}",
-    "```",
-    "Propagation Path: Parameter 'obj' in foo --> foo returns null --> myObj assigned null in bar, which then gets dereferenced causing a method call on null",
-    "Explanation: The method foo returns null when passed a null input. In bar, this leads to myObj being null, which in turn causes a NullPointerException when calling toString(). As there is no conflicting branch condition preventing this case, the propagation path is reachable.",
-    "Answer: Yes"
+    {
+      "User": "Program context:\n```java\npublic <T> T deserialze(DefaultJSONParser parser, Type type, Object fieldName) {\n    // ...\n    Class<?> componentClass = TypeUtils.getClass(componentType);\n    parser.parseArray(componentClass, array, fieldName);\n    // ...\n}\n```\nPropagation Path: `deserialze`'s parameter `type` -> `componentClass` -> `parser.parseArray`'s first argument.",
+      "System": "Explanation: Yes, this is a classic fastjson insecure deserialization vulnerability. The source `type` parameter, which is controlled by the caller and the JSON input, is used to derive `componentClass`. This `componentClass` is then passed directly to the `parser.parseArray` sink. Because `parseArray` honors the `@type` field for the provided class, an attacker can craft a JSON payload to force the deserialization of a malicious gadget class. The path lacks any validation to ensure `componentClass` is a safe type. This allows for arbitrary code execution.\nAnswer: Yes"
+    }
   ],
-  "additional_fact": [
-    "Additional details may include whether specific lines fall within if-statements and the corresponding line numbers for those conditions.",
-    "For each line in the provided path, follow this reasoning:",
-    "- Indicate whether line {line_number} is inside the 'true' or 'else' branch of an if-statement.",
-    "- State whether, given the variable values, the branch condition will always be evaluated as true, always as false, or is indeterminate.",
-    "- Conclude whether line {line_number} is reachable.",
-    "After analyzing each line, decide if the overall path's condition is satisfiable (reachable) or not."
-  ],
+  "additional_fact": [],
   "answer_format": [
-    "(1) In the first line, provide your detailed reasoning and explanation.",
-    "(2) In the second line, simply state Yes or No.",
-    "Example:",
-    "Explanation: {Your detailed explanation.}",
-    "Answer: Yes"
+    "(1) Start with your detailed security assessment in the 'Explanation' section.",
+    "(2) Conclude with a simple 'Yes' or 'No' on a new line starting with 'Answer:'."
   ],
-  "meta_prompts": [
-    "Now I will provide you with the program:",
-    "```",
-    "<PROGRAM>",
-    "```",
-    "Please answer the following question:",
-    "<QUESTION>",
-    "Your answer should follow this format:",
-    "<ANSWER>",
-    "Remember: Do not assume the behavior or return values of external methods not provided in the program. Only evaluate the conditions present in the given code."
-  ]
+  "meta_prompts": []
 }

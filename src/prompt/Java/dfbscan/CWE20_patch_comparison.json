@@ -1,0 +1,17 @@
+{
+  "model_role_name": "Patch Review Security Analyst",
+  "user_role_name": "Patch Review Security Analyst",
+  "system_role": "You are a world-class Java security analyst specializing in the Fastjson library. You understand the deep semantics of Java's Type System, including Generics and Type Erasure, and how they relate to deserialization vulnerabilities.",
+  "task": "Your mission is to analyze a code change and determine **why** it fixes a critical security vulnerability. You will be shown a vulnerable line of code and the patched line of code, both within the context of the full function. You must leverage the provided 'Domain Knowledge' to explain the semantic difference between the two versions.",
+  "analysis_rules": [
+    "- Step 1: **Analyze the Change.** The only difference is the variable passed to `parser.parseArray()`: `componentClass` vs. `componentType`.",
+    "- Step 2: **Consult Domain Knowledge.** The key is understanding Java Type Erasure. The provided knowledge states that casting to `(Class)` loses generic type information.",
+    "- Step 3: **Trace the Origin of Both Variables.** In the vulnerable code path, both `componentClass` and `componentType` originate from `clazz.getComponentType()`, where `clazz` has already been cast to a raw `Class`. Therefore, both variables lack the necessary precision.",
+    "- Step 4: **Explain the Semantic Violation.** The `parser.parseArray` API has a semantic contract: it needs the full generic type information to operate safely. Passing it a variable (`componentClass` or, in this path, `componentType` as well) that has suffered from type erasure violates this contract, leading to a vulnerability.",
+    "- Step 5: **Explain the Patch.** While in this specific code path the patch seems trivial because both variables are the same, the *intent* of the patch is to prefer `componentType`. In the *safe* `if` branch, `componentType` correctly retains generic information. The patch applies this safer convention consistently, although a more robust fix would involve reworking the `else` branch logic entirely. The core of the vulnerability is using a variable subject to type erasure where a precise `Type` is needed."
+  ],
+  "analysis_examples": [],
+  "question_template": "### Domain Knowledge\n- **Java Type Erasure:** In Java, when a generic `Type` object is cast to a raw `Class`, its generic parameter information is lost. This is a fundamental feature called Type Erasure.\n- **Fastjson's `parseArray` API Contract:** The `parser.parseArray(Type, ...)` method is designed to handle rich `Type` objects (like `GenericArrayType` or `ParameterizedType`). It relies on the information within these `Type` objects to correctly and safely deserialize complex generic collections. Passing it a simple `Class` object that has lost its generic context can lead to type confusion and bypass security checks.\n\n### Code Context\n```java\n// Function Code:\n<FUNC_CODE>\n\n// Vulnerable Line:\nparser.parseArray(componentClass, array, fieldName);\n\n// Patched Line:\nparser.parseArray(componentType, array, fieldName);\n```\n\n### Analysis Task\nBased on the domain knowledge and the code context, explain in detail why using `componentClass` is dangerous and why the patch, which uses `componentType`, is the correct fix. Focus on the concept of **Type Precision Loss** and the **semantic contract** of the `parseArray` API.",
+  "answer_format_cot": [],
+  "meta_prompts": []
+} 

@@ -12,6 +12,8 @@ import threading
 
 import json
 from ui.logger import Logger
+from openai import OpenAI
+import anthropic
 
 
 class LLM:
@@ -21,24 +23,51 @@ class LLM:
 
     def __init__(
         self,
-        online_model_name: str,
-        logger: Logger,
-        temperature: float = 0.0,
-        system_role="You are a experienced programmer and good at understanding programs written in mainstream programming languages.",
+        model_name: str,
+        temperature: float,
+        system_role: str,
+        logger: Logger
     ) -> None:
-        self.online_model_name = online_model_name
+        self.model_name = model_name
         self.temperature = temperature
-        self.systemRole = system_role
+        self.system_role = system_role
         self.logger = logger
-        self.gemini_model = genai.GenerativeModel(self.online_model_name)
-        return
+        self.token_num = 0
+
+        if "gemini" in self.model_name:
+            # As requested, hardcoding the API key directly in the code.
+            api_key = "AIzaSyCWA58IOFNqypP0oENiOK5rvKApirD5P_w"
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel(
+                self.model_name,
+                generation_config=genai.types.GenerationConfig(temperature=self.temperature),
+                safety_settings=[ # Disable all safety settings
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                ],
+                system_instruction=self.system_role,
+            )
+        elif "gpt" in self.model_name:
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError("OPENAI_API_KEY environment variable not found.")
+            self.openai_client = OpenAI()
+            self.model = self.model_name
+        elif "claude" in self.model_name:
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                raise ValueError("ANTHROPIC_API_KEY environment variable not found.")
+            self.anthropic_client = anthropic.Anthropic()
+            self.model = self.model_name
+        else:
+            raise NotImplementedError(f"Model {self.model_name} is not supported.")
 
     def infer(
         self, message: str, is_measure_cost: bool = False
     ) -> Tuple[str, int, int]:
-        self.logger.print_log(self.online_model_name, "is running")
+        self.logger.print_log(self.model_name, "is running")
         output = ""
-        if "gemini" in self.online_model_name:
+        if "gemini" in self.model_name:
             output = self.infer_with_gemini(message)
         else:
             raise ValueError("Unsupported model name")
@@ -46,10 +75,10 @@ class LLM:
         input_token_cost = (
             0
             if not is_measure_cost
-            else self.gemini_model.count_tokens(self.systemRole + "\n" + message).total_tokens
+            else self.model.count_tokens(self.system_role + "\n" + message).total_tokens
         )
         output_token_cost = (
-            0 if not is_measure_cost else self.gemini_model.count_tokens(output).total_tokens
+            0 if not is_measure_cost else self.model.count_tokens(output).total_tokens
         )
         return output, input_token_cost, output_token_cost
 
@@ -69,31 +98,9 @@ class LLM:
     def infer_with_gemini(self, message: str) -> str:
         """Infer using the Gemini model from Google Generative AI"""
         def call_api():
-            message_with_role = self.systemRole + "\n" + message
-            safety_settings = [
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_NONE",
-                },
-            ]
-            response = self.gemini_model.generate_content(
+            message_with_role = self.system_role + "\n" + message
+            response = self.model.generate_content(
                 message_with_role,
-                safety_settings=safety_settings,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=self.temperature
-                ),
             )
             return response.text
 

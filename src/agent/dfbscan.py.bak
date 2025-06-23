@@ -23,10 +23,8 @@ from tstool.dfbscan_extractor.Java.Java_NPD_extractor import *
 from tstool.dfbscan_extractor.Java.Java_CWE20_extractor import *
 from tstool.dfbscan_extractor.Python.Python_NPD_extractor import *
 from tstool.dfbscan_extractor.Go.Go_NPD_extractor import *
-from tstool.dfbscan_extractor.Java.Java_ImproperValidation_extractor import Java_ImproperValidation_extractor
 
 from llmtool.LLM_tool import *
-from llmtool.dfbscan.intra_dataflow_analyzer import IntraDataFlowAnalyzer
 from llmtool.dfbscan.step_tracer import StepTracer
 from llmtool.dfbscan.path_validator import PathValidator
 from ui.logger import Logger
@@ -72,7 +70,6 @@ class DFBScanAgent(Agent):
                 os.makedirs(self.res_dir_path)
 
         self.step_tracer = StepTracer(self.model_name, self.temperature, self.language, self.MAX_QUERY_NUM, self.logger)
-        self.intra_dfa = IntraDataFlowAnalyzer(self.model_name, self.temperature, self.language, self.MAX_QUERY_NUM, self.logger, self.bug_type)
         self.path_validator = PathValidator(self.model_name, self.temperature, self.language, self.MAX_QUERY_NUM, self.logger)
         
         self.ts_analyzer.analyze_call_graph()
@@ -90,7 +87,7 @@ class DFBScanAgent(Agent):
             if self.bug_type == "UAF": return Cpp_UAF_Extractor(self.ts_analyzer)
         elif self.language == "Java":
             if self.bug_type == "NPD": return Java_NPD_Extractor(self.ts_analyzer)
-            if self.bug_type == "CWE-20": return Java_ImproperValidation_extractor(self.ts_analyzer)
+            if self.bug_type == "CWE-20": return Java_CWE20_extractor(self.ts_analyzer)
         elif self.language == "Python":
             if self.bug_type == "NPD": return Python_NPD_Extractor(self.ts_analyzer)
         elif self.language == "Go":

@@ -20,36 +20,45 @@ class Java_TSAnalyzer(TSAnalyzer):
         self, file_path: str, source_code: str, tree: tree_sitter.Tree
     ) -> None:
         """
-        Parse the function information in a Java source file.
         Parse method declarations as function definitions.
+        This query aims to find all method declarations within a class body,
+        regardless of annotations.
         """
-        all_function_definition_nodes = find_nodes_by_type(
-            tree.root_node, "method_declaration"
-        )
-        for node in all_function_definition_nodes:
-            function_name = ""
-            for sub_node in node.children:
-                if sub_node.type == "identifier":
-                    function_name = source_code[sub_node.start_byte : sub_node.end_byte]
-                    break
-            if function_name == "":
-                continue
+        query_str = """
+        (class_body
+          (method_declaration
+            name: (identifier) @name) @method)
+        """
+        
+        query = self.language.query(query_str)
+        
+        captures = query.captures(tree.root_node)
 
-            start_line_number = source_code[: node.start_byte].count("\n") + 1
-            end_line_number = source_code[: node.end_byte].count("\n") + 1
-            function_id = len(self.functionRawDataDic) + 1
+        processed_nodes = set()
+        for node, capture_name in captures:
+            if capture_name == 'method':
+                if node.id in processed_nodes:
+                    continue
+                processed_nodes.add(node.id)
 
-            self.functionRawDataDic[function_id] = (
-                function_name,
-                start_line_number,
-                end_line_number,
-                node,
-            )
-            self.functionToFile[function_id] = file_path
-
-            if function_name not in self.functionNameToId:
-                self.functionNameToId[function_name] = set()
-            self.functionNameToId[function_name].add(function_id)
+                name_node = node.child_by_field_name('name')
+                if name_node:
+                    function_name = name_node.text.decode('utf8')
+                    start_line_number = node.start_point[0] + 1
+                    end_line_number = node.end_point[0] + 1
+                    
+                    if function_name not in self.functionNameToId:
+                        self.functionNameToId[function_name] = []
+                    
+                    current_function_id = len(self.functionRawDataDic)
+                    self.functionRawDataDic[current_function_id] = (
+                        function_name,
+                        start_line_number,
+                        end_line_number,
+                        node,
+                    )
+                    self.functionNameToId[function_name].append(current_function_id)
+                    self.functionToFile[current_function_id] = file_path
         return
 
     def extract_global_info(
@@ -361,3 +370,54 @@ class Java_TSAnalyzer(TSAnalyzer):
                 loop_body_end_line,
             )
         return loop_statements
+
+    def get_local_variable_declarations(self, function: Function) -> List[str]:
+        """
+        Extracts all local variable declaration statements within a given function.
+        e.g., 'Class<?> componentClass = null;'
+        """
+        declarations = []
+        try:
+            start_line = function.start_line
+            end_line = function.end_line
+            
+            # Tree-sitter query to find local variable declarations
+            query_str = """
+            (local_variable_declaration) @declaration
+            """
+            query = self.language.query(query_str)
+            captures = query.captures(self.root_node, start_byte=function.start_byte, end_byte=function.end_byte)
+            
+            for node, _ in captures:
+                declarations.append(node.text.decode('utf8'))
+        except Exception as e:
+            # Handle potential errors, e.g., in parsing
+            print(f"Error extracting local variables for function {function.name}: {e}")
+            
+        return declarations
+
+    def get_assignment_expressions(self, function: Function) -> List[str]:
+        """
+        Extracts all assignment expression statements within a given function.
+        e.g., 'componentType = ((Class) type).getComponentType();'
+        """
+        assignments = []
+        try:
+            # Tree-sitter query to find assignment expressions
+            query_str = """
+            (assignment_expression) @assignment
+            """
+            query = self.language.query(query_str)
+            captures = query.captures(self.root_node, start_byte=function.start_byte, end_byte=function.end_byte)
+
+            for node, _ in captures:
+                # We often get the expression itself, we want the whole statement for context
+                current_node = node
+                while current_node.parent and current_node.type != 'expression_statement':
+                    current_node = current_node.parent
+                assignments.append(current_node.text.decode('utf8'))
+
+        except Exception as e:
+            print(f"Error extracting assignments for function {function.name}: {e}")
+
+        return list(set(assignments)) # Return unique assignments

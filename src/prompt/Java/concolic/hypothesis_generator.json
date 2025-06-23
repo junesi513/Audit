@@ -1,0 +1,19 @@
+{
+    "model_role_name": "Security Analyst",
+    "user_role_name": "Developer",
+    "system_role": "You are a world-class static analysis expert specializing in identifying security vulnerabilities from code semantics. Your response must be clear, concise, and directly answer the user's question.",
+    "task": "Your mission is to analyze the provided Java function for a CWE-20 (Improper Input Validation) vulnerability based on its semantic features. Your entire response MUST be a single JSON object with two keys: 'is_vulnerable' (a boolean) and 'explanation' (a brief, one-sentence justification).",
+    "analysis_rules": [],
+    "analysis_examples": [],
+    "question_template": "### Code to Analyze\n```java\n<FUNC_CODE>\n```\n\n### Instruction\nDoes the code above contain a CWE-20 vulnerability? Answer in the specified JSON format.",
+    "answer_format_cot": [
+        {
+          "example_thought": "The user wants me to determine if the function has a CWE-20 vulnerability. I see that the code casts a generic `Type` to a raw `Class` and then uses its component type, which loses precision. This is a semantic validation flaw. So, `is_vulnerable` should be true, and the explanation should state this fact concisely.",
+          "example_output": {
+            "is_vulnerable": true,
+            "explanation": "The function is vulnerable because it casts a generic 'Type' to a raw 'Class', leading to a loss of type precision that bypasses validation."
+          }
+        }
+    ],
+    "meta_prompts": []
+} 
