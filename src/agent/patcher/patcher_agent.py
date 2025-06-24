@@ -122,14 +122,46 @@ class PatcherAgent(Agent):
                 self.logger.print_console(f"Failed to generate patch for {bug_report['file_path']}: {llm_output.error_message}", "error")
                 continue
 
-            patched_code = patch_generator.get_text(llm_output).strip()
+            patch_candidates = llm_output.output
+            if not patch_candidates:
+                self.logger.print_console(f"LLM returned no patch candidates for {bug_report['file_path']}.", "error")
+                continue
+
+            best_patch = None
+            min_diff_size = float('inf')
             
-            if patched_code.startswith("```java"):
-                patched_code = patched_code[len("```java"):].strip()
-            if patched_code.startswith("```"):
-                patched_code = patched_code[len("```"):].strip()
-            if patched_code.endswith("```"):
-                patched_code = patched_code[:-len("```")].strip()
+            self.logger.print_console(f"Generated {len(patch_candidates)} patch candidates. Selecting the one with the minimal changes...")
+
+            original_code = bug_report['function_code']
+
+            for i, candidate_patch in enumerate(patch_candidates):
+                # Clean up the candidate patch
+                candidate_patch = candidate_patch.strip()
+                if candidate_patch.startswith("```java"):
+                    candidate_patch = candidate_patch[len("```java"):].strip()
+                if candidate_patch.startswith("```"):
+                    candidate_patch = candidate_patch[len("```"):].strip()
+                if candidate_patch.endswith("```"):
+                    candidate_patch = candidate_patch[:-len("```")].strip()
+                
+                diff = list(difflib.unified_diff(
+                    original_code.splitlines(),
+                    candidate_patch.splitlines()
+                ))
+                diff_size = len([line for line in diff if line.startswith('+') or line.startswith('-')])
+
+                self.logger.print_log(f"Candidate {i+1} diff size: {diff_size}")
+
+                if diff_size < min_diff_size:
+                    min_diff_size = diff_size
+                    best_patch = candidate_patch
+
+            if best_patch is None:
+                self.logger.print_console(f"Could not determine the best patch for {bug_report['file_path']}.", "error")
+                continue
+            
+            self.logger.print_console(f"Selected the best patch with a diff size of {min_diff_size}.")
+            patched_code = best_patch
 
             self.logger.print_console("Successfully generated patched code.")
             

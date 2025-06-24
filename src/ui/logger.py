@@ -31,6 +31,7 @@ class Logger:
             # Console handler
             ch = logging.StreamHandler()
             ch.setLevel(log_level)
+            self.console_handler = ch  # Save handler as instance attribute
 
             # Formatter
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -52,8 +53,13 @@ class Logger:
             # Remove the console handler if it exists, so the message is logged only to file
             if self.console_handler in self.logger.handlers:
                 self.logger.removeHandler(self.console_handler)
+            
             message = " ".join(map(str, args))
             self.logger.info(message)
+
+            # Add the console handler back for future console logs
+            if self.console_handler not in self.logger.handlers:
+                self.logger.addHandler(self.console_handler)
 
     def print_console(self, message: str, level: str = 'info'):
         with self._log_lock:
