@@ -1,13 +1,9 @@
-import sys
-from os import path
-from typing import List, Tuple, Dict, Set
 import tree_sitter
-
-sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
+from typing import List, Tuple, Dict, Set
 
 from src.tstool.analyzer.TS_analyzer import *
-from memory.syntactic.function import *
-from memory.syntactic.value import *
+from src.memory.syntactic.function import *
+from src.memory.syntactic.value import *
 
 
 class JavaTSAnalyzer(TSAnalyzer):
@@ -21,13 +17,12 @@ class JavaTSAnalyzer(TSAnalyzer):
     ) -> None:
         """
         Parse method declarations as function definitions.
-        This query aims to find all method declarations within a class body,
-        regardless of annotations.
+        This query aims to find all method declarations, regardless of annotations or class body context.
         """
         query_str = """
-        (class_body
-          (method_declaration
-            name: (identifier) @name) @method)
+        (method_declaration
+            (modifiers) @mods
+            name: (identifier) @name) @method
         """
         
         query = self.language.query(query_str)
@@ -421,3 +416,31 @@ class JavaTSAnalyzer(TSAnalyzer):
             print(f"Error extracting assignments for function {function.name}: {e}")
 
         return list(set(assignments)) # Return unique assignments
+
+    def find_function_by_name(self, function_name: str) -> dict:
+        """Finds a function by its name and returns its details."""
+        if not function_name: return None
+        for function in self.function_env.values():
+            if function.function_name == function_name:
+                return {
+                    'name': function.function_name,
+                    'code': function.function_code,
+                    'file_path': function.file_path,
+                    'start_line': function.start_line_number,
+                    'end_line': function.end_line_number,
+                }
+        return None
+
+    def get_function_source_code(self, function_name: str) -> str:
+        """Retrieves the source code of a function by its name."""
+        function_info = self.find_function_by_name(function_name)
+        if function_info:
+            return function_info['code']
+        return ""
+    
+    def get_all_imports(self) -> list:
+        """
+        Get all imports from the source code.
+        """
+        # Implementation of get_all_imports method
+        pass

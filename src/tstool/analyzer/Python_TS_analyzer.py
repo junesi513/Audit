@@ -6,8 +6,8 @@ import tree_sitter
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
 from src.tstool.analyzer.TS_analyzer import *
-from memory.syntactic.function import *
-from memory.syntactic.value import *
+from src.memory.syntactic.function import *
+from src.memory.syntactic.value import *
 
 
 class Python_TSAnalyzer(TSAnalyzer):

@@ -6,15 +6,15 @@ import time
 
 sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
 
-from tstool.bugscan_extractor.bugscan_extractor import *
-from tstool.bugscan_extractor.Cpp.Cpp_BOF_extractor import *
-from tstool.bugscan_extractor.Cpp.Cpp_MLK_extractor import *
-from tstool.bugscan_extractor.Cpp.Cpp_NPD_extractor import *
-from tstool.bugscan_extractor.Cpp.Cpp_UAF_extractor import *
-from tstool.bugscan_extractor.Go.Go_BOF_extractor import *
-from tstool.bugscan_extractor.Go.Go_NPD_extractor import *
-from tstool.bugscan_extractor.Java.Java_NPD_extractor import *
-from tstool.bugscan_extractor.Python.Python_NPD_extractor import *
+from src.tstool.bugscan_extractor.bugscan_extractor import *
+from src.tstool.bugscan_extractor.Cpp.Cpp_BOF_extractor import *
+from src.tstool.bugscan_extractor.Cpp.Cpp_MLK_extractor import *
+from src.tstool.bugscan_extractor.Cpp.Cpp_NPD_extractor import *
+from src.tstool.bugscan_extractor.Cpp.Cpp_UAF_extractor import *
+from src.tstool.bugscan_extractor.Go.Go_BOF_extractor import *
+from src.tstool.bugscan_extractor.Go.Go_NPD_extractor import *
+from src.tstool.bugscan_extractor.Java.Java_NPD_extractor import *
+from src.tstool.bugscan_extractor.Python.Python_NPD_extractor import *
 
 from repoaudit import RepoAudit
 

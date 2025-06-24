@@ -5,6 +5,7 @@ import copy
 import concurrent.futures
 from typing import List, Tuple, Dict, Set, Optional
 from abc import ABC, abstractmethod
+import threading
 
 import tree_sitter
 from tree_sitter import Language
@@ -13,9 +14,9 @@ import networkx as nx
 
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
-from memory.syntactic.function import *
-from memory.syntactic.api import *
-from memory.syntactic.value import *
+from src.memory.syntactic.function import *
+from src.memory.syntactic.api import *
+from src.memory.syntactic.value import *
 
 
 class Parenthesis(Enum):
@@ -141,6 +142,7 @@ class TSAnalyzer(ABC):
         TSPATH = cwd / "../../../lib/build/"
         language_path = TSPATH / "my-languages.so"
         self.max_symbolic_workers_num = max_symbolic_workers_num
+        self._lock = threading.Lock()
 
         # Initialize tree-sitter parser
         self.parser = tree_sitter.Parser()

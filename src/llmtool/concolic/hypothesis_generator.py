@@ -7,10 +7,7 @@ from dataclasses import dataclass
 
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
-from llmtool.LLM_tool import *
-from memory.syntactic.function import Function
-
-BASE_PATH = Path(__file__).resolve().parents[3]
+from src.llmtool.LLM_utils import LLM, Prompt, LLMToolOutput, LLMToolInput
 
 @dataclass
 class HypothesisGeneratorInput(LLMToolInput):
@@ -28,58 +25,36 @@ class HypothesisGeneratorOutput(LLMToolOutput):
     output: dict
     error: str = None
 
-class HypothesisGenerator(LLMTool):
-    def __init__(
-        self,
-        model_name: str,
-        temperature: float,
-        language: str,
-        max_query_num: int,
-        logger: Logger
-    ) -> None:
-        prompt_path = f"{BASE_PATH}/src/prompt/{language.capitalize()}/concolic/hypothesis_generator.json"
-        with open(prompt_path, 'r') as f:
-            self.prompt_template_data = json.load(f)
-        
-        self.system_role = self.prompt_template_data.get("system_role", "")
-        
-        super().__init__(model_name, temperature, language, max_query_num, logger)
-        
-        self.prompt_template = self.prompt_template_data["question_template"]
+class HypothesisGenerator:
+    def __init__(self, model_name: str, language: str, api_key: str = None, **kwargs):
+        self.language = language
+        self.prompt_path = self._get_default_prompt_path()
+        self.prompt = Prompt(self.prompt_path)
+        self.model = LLM(model_name=model_name, api_key=api_key)
 
-    def _get_prompt(self, llm_tool_input: LLMToolInput) -> str:
-        if not isinstance(llm_tool_input, HypothesisGeneratorInput):
-            raise TypeError("Input must be of type HypothesisGeneratorInput")
+    def _get_default_prompt_path(self):
+        base_path = Path(__file__).resolve().parents[3]
+        return f"{base_path}/src/prompt/{self.language.capitalize()}/concolic/hypothesis_generator.json"
 
-        func_code = llm_tool_input.function_code
-        return self.prompt_template.replace("<FUNC_CODE>", func_code)
+    def generate(self, function_code: str) -> LLMToolOutput:
+        prompt_str = self.prompt.get_string_with_inputs({'FUNC_CODE': function_code})
+        raw_output = self.model.generate(prompt_str)
+        return self._post_process(raw_output)
 
-    def _parse_response(self, response: str, input: LLMToolInput = None) -> LLMToolOutput:
+    def _post_process(self, output: str) -> LLMToolOutput:
         try:
             # The JSON content is assumed to be within ```json ... ```
-            json_str = self._extract_json_from_response(response)
-            if not json_str:
-                self.logger.print_log("No JSON block found in the response.")
-                return None
-            output_data = json.loads(json_str)
-            return HypothesisGeneratorOutput(output=output_data)
+            json_match = re.search(r"```json\n(.*?)\n```", output, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+                parsed_json = json.loads(json_str)
+                return LLMToolOutput(is_valid=True, output=parsed_json)
         except json.JSONDecodeError as e:
-            self.logger.print_log(f"Error decoding extracted JSON: {e}")
-            self.logger.print_log(f"Raw Response Body: {response}")
-            return None
+            return LLMToolOutput(is_valid=False, error_message=f"JSONDecodeError: {e}")
         except Exception as e:
-            self.logger.print_log(f"An unexpected error occurred during parsing: {e}")
-            return None
+            return LLMToolOutput(is_valid=False, error_message=f"An unexpected error occurred: {e}")
+        
+        return LLMToolOutput(is_valid=False, error_message="Could not extract JSON from LLM output.")
 
-    def _extract_json_from_response(self, response: str) -> str:
-        json_match = re.search(r"```json\n(.*?)\n```", response, re.DOTALL)
-        if not json_match:
-            self.logger.info("LLM response did not contain a JSON markdown block. Falling back to raw search.")
-            json_match = re.search(r"{\s*\"hypothesis_description\":.*}", response, re.DOTALL)
-
-        if json_match:
-            json_str = json_match.group(1) if len(json_match.groups()) > 0 else json_match.group(0)
-            return json_str
-        else:
-            self.logger.info(f"Could not find any JSON in the response.\nRaw Response:\n{response}")
-            return None 
+    def get_hypothesis(self, output: LLMToolOutput):
+        return output.output if output.is_valid else None

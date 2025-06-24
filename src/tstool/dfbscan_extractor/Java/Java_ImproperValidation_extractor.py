@@ -3,10 +3,10 @@ from os import path
 
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
-from tstool.analyzer.TS_analyzer import *
-from tstool.analyzer.Java_TS_analyzer import *
-from tstool.dfbscan_extractor.dfbscan_extractor import DFBScanExtractor
-from memory.syntactic.value import Value, ValueLabel
+from src.tstool.analyzer.TS_analyzer import *
+from src.tstool.analyzer.Java_TS_analyzer import *
+from src.tstool.dfbscan_extractor.dfbscan_extractor import DFBScanExtractor
+from src.memory.syntactic.value import Value, ValueLabel
 import tree_sitter
 from pathlib import Path
 

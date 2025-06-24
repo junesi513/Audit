@@ -1,50 +1,54 @@
-from memory.syntactic.function import *
-from memory.syntactic.value import *
-from typing import Dict
+import json
+from pathlib import Path
 
 
 class BugReport:
     def __init__(
         self,
-        bug_type: str,
-        buggy_value: Value,
-        relevant_functions: Dict[int, Function],
-        explanation: str,
-        is_human_confirmed_true: bool = None,
+        cwe_id: str,
+        file_path: str,
+        function_name: str,
+        start_line: int,
+        end_line: int,
+        function_code: str,
+        language: str,
+        explanation: str = "N/A",
     ) -> None:
         """
-        :param bug_type: the bug type
-        :param buggy_value: the buggy value
-        :param relevant_functions: the relevant functions
+        :param cwe_id: the CWE ID
+        :param file_path: the file path
+        :param function_name: the function name
+        :param start_line: the start line
+        :param end_line: the end line
+        :param function_code: the function code
+        :param language: the language
         :param explanation: the explanation
         """
-        self.bug_type = bug_type
-        self.buggy_value = buggy_value
-        self.relevant_functions = relevant_functions
+        self.cwe_id = cwe_id
+        self.file_path = file_path
+        self.function_name = function_name
+        self.start_line = start_line
+        self.end_line = end_line
+        self.function_code = function_code
+        self.language = language
         self.explanation = explanation
-        self.is_human_confirmed_true = is_human_confirmed_true
-        return
 
     def to_dict(self) -> dict:
-        # Assuming there is at least one relevant function, which should be the case.
-        first_func_id = next(iter(self.relevant_functions))
-        first_func = self.relevant_functions[first_func_id]
-
         return {
-            "bug_type": self.bug_type,
-            "file_path": first_func.file_path,
-            "function_name": first_func.function_name,
-            "function_code": first_func.function_code,
-            "start_line": first_func.start_line_number,
-            "end_line": first_func.end_line_number,
-            "buggy_value": str(self.buggy_value),
+            "cwe_id": self.cwe_id,
+            "file_path": self.file_path,
+            "function_name": self.function_name,
+            "start_line": self.start_line,
+            "end_line": self.end_line,
+            "function_code": self.function_code,
+            "language": self.language,
             "explanation": self.explanation,
-            "is_human_confirmed_true": (
-                str(self.is_human_confirmed_true)
-                if self.is_human_confirmed_true is not None
-                else "unknown"
-            ),
         }
 
+    def dump(self, output_dir: Path):
+        report_path = output_dir / "bug_report.json"
+        with report_path.open('w') as f:
+            json.dump(self.to_dict(), f, indent=4)
+
     def __str__(self):
-        return str(self.to_dict())
+        return json.dumps(self.to_dict(), indent=4)

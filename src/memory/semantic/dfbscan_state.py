@@ -1,8 +1,8 @@
-from memory.syntactic.function import *
-from memory.syntactic.value import *
-from memory.report.bug_report import *
-from memory.semantic.state import *
-from tstool.analyzer.TS_analyzer import *
+from src.memory.syntactic.function import *
+from src.memory.syntactic.value import *
+from src.memory.report.bug_report import *
+from src.memory.semantic.state import *
+from src.tstool.analyzer.TS_analyzer import *
 from typing import List, Tuple, Dict
 
 

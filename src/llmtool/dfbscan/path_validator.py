@@ -2,11 +2,11 @@ from os import path
 import json
 import time
 from typing import List, Set, Optional, Dict
-from llmtool.LLM_utils import *
-from llmtool.LLM_tool import *
-from memory.syntactic.function import *
-from memory.syntactic.value import *
-from memory.syntactic.api import *
+from src.llmtool.LLM_utils import *
+from src.llmtool.LLM_tool import *
+from src.memory.syntactic.function import *
+from src.memory.syntactic.value import *
+from src.memory.syntactic.api import *
 
 BASE_PATH = Path(__file__).resolve().parent.parent.parent
 

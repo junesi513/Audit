@@ -1,5 +1,5 @@
 /*
- * Copyright 1999-2101 Alibaba Group.
+ * Copyright 1999-2018 Alibaba Group.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ public class ObjectArrayCodec implements ObjectSerializer, ObjectDeserializer {
                         out.write(',');
                         serializer.println();
                     }
-                    serializer.write(array[i]);
+                    serializer.writeWithFieldName(array[i], Integer.valueOf(i));
                 }
                 serializer.decrementIdent();
                 serializer.println();
@@ -95,12 +95,12 @@ public class ObjectArrayCodec implements ObjectSerializer, ObjectDeserializer {
                         Class<?> clazz = item.getClass();
 
                         if (clazz == preClazz) {
-                            preWriter.write(serializer, item, null, null, 0);
+                            preWriter.write(serializer, item, i, null, 0);
                         } else {
                             preClazz = clazz;
                             preWriter = serializer.getObjectWriter(clazz);
 
-                            preWriter.write(serializer, item, null, null, 0);
+                            preWriter.write(serializer, item, i, null, 0);
                         }
                     }
                     out.append(',');
@@ -124,43 +124,66 @@ public class ObjectArrayCodec implements ObjectSerializer, ObjectDeserializer {
         }
     }
     
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-
-class Utils {
-
-    public static byte[] calculateFileHash(String filePath, String algorithm) throws IOException, NoSuchAlgorithmException {
-        if (filePath == null || filePath.isEmpty()) {
-            throw new IllegalArgumentException("File path cannot be null or empty.");
-        }
-         if (algorithm == null || algorithm.isEmpty()) {
-            throw new IllegalArgumentException("Algorithm cannot be null or empty.");
-        }
-        MessageDigest md = MessageDigest.getInstance(algorithm);
-        File file = new File(filePath);
-        if (!file.exists() || !file.isFile() || !Files.isReadable(file.toPath())) {
-            throw new IllegalArgumentException("File not found or not readable.");
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    public <T> T deserialze(DefaultJSONParser parser, Type type, Object fieldName) {
+        final JSONLexer lexer = parser.lexer;
+        int token = lexer.token();
+        if (token == JSONToken.NULL) {
+            lexer.nextToken(JSONToken.COMMA);
+            return null;
         }
 
-        try (FileInputStream fis = new FileInputStream(file)) {
-            byte[] buffer = new byte[8192]; // Use a reasonable buffer size
-            int bytesRead;
-            while ((bytesRead = fis.read(buffer)) != -1) {
-                md.update(buffer, 0, bytesRead);
+        if (token == JSONToken.LITERAL_STRING || token == JSONToken.HEX) {
+            byte[] bytes = lexer.bytesValue();
+            lexer.nextToken(JSONToken.COMMA);
+
+            if (bytes.length == 0 && type != byte[].class) {
+                return null;
             }
-        }
-        return md.digest();
-    }
 
-    public static boolean compareHashes(byte[] hash1, byte[] hash2) {
-        return Arrays.equals(hash1, hash2);
+            return (T) bytes;
+        }
+
+        Class componentClass;
+        Type componentType;
+        if (type instanceof GenericArrayType) {
+            GenericArrayType clazz = (GenericArrayType) type;
+            componentType = clazz.getGenericComponentType();
+            if (componentType instanceof TypeVariable) {
+                TypeVariable typeVar = (TypeVariable) componentType;
+                Type objType = parser.getContext().type;
+                if (objType instanceof ParameterizedType) {
+                    ParameterizedType objParamType = (ParameterizedType) objType;
+                    Type objRawType = objParamType.getRawType();
+                    Type actualType = null;
+                    if (objRawType instanceof Class) {
+                        TypeVariable[] objTypeParams = ((Class) objRawType).getTypeParameters();
+                        for (int i = 0; i < objTypeParams.length; ++i) {
+                            if (objTypeParams[i].getName().equals(typeVar.getName())) {
+                                actualType = objParamType.getActualTypeArguments()[i];
+                            }
+                        }
+                    }
+                    if (actualType instanceof Class) {
+                        componentClass = (Class) actualType;
+                    } else {
+                        componentClass = Object.class;
+                    }
+                } else {
+                    componentClass = TypeUtils.getClass(typeVar.getBounds()[0]);
+                }
+            } else {
+                componentClass = TypeUtils.getClass(componentType);
+            }
+        } else {
+            Class clazz = (Class) type;
+            componentType = componentClass = clazz.getComponentType();
+        }
+        JSONArray array = new JSONArray();
+        parser.parseArray(componentType, array, fieldName);
+
+        return (T) toObjectArray(parser, componentClass, array);
     }
-}
 
     @SuppressWarnings("unchecked")
     private <T> T toObjectArray(DefaultJSONParser parser, Class<?> componentType, JSONArray array) {

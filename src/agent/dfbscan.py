@@ -13,24 +13,24 @@ import networkx as nx
 
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
-from agent.agent import *
-from memory.semantic.dfbscan_state import *
-from tstool.dfbscan_extractor.dfbscan_extractor import *
-from tstool.dfbscan_extractor.Cpp.Cpp_MLK_extractor import *
-from tstool.dfbscan_extractor.Cpp.Cpp_NPD_extractor import *
-from tstool.dfbscan_extractor.Cpp.Cpp_UAF_extractor import *
-from tstool.dfbscan_extractor.Java.Java_NPD_extractor import *
-from tstool.dfbscan_extractor.Java.Java_CWE20_extractor import *
-from tstool.dfbscan_extractor.Python.Python_NPD_extractor import *
-from tstool.dfbscan_extractor.Go.Go_NPD_extractor import *
-from tstool.dfbscan_extractor.Java.Java_ImproperValidation_extractor import Java_ImproperValidation_extractor
+from src.agent.agent import *
+from src.memory.semantic.dfbscan_state import *
+from src.tstool.dfbscan_extractor.dfbscan_extractor import *
+from src.tstool.dfbscan_extractor.Cpp.Cpp_MLK_extractor import *
+from src.tstool.dfbscan_extractor.Cpp.Cpp_NPD_extractor import *
+from src.tstool.dfbscan_extractor.Cpp.Cpp_UAF_extractor import *
+from src.tstool.dfbscan_extractor.Java.Java_NPD_extractor import *
+from src.tstool.dfbscan_extractor.Java.Java_CWE20_extractor import *
+from src.tstool.dfbscan_extractor.Python.Python_NPD_extractor import *
+from src.tstool.dfbscan_extractor.Go.Go_NPD_extractor import *
+from src.tstool.dfbscan_extractor.Java.Java_ImproperValidation_extractor import Java_ImproperValidation_extractor
 
-from llmtool.LLM_tool import *
-from llmtool.dfbscan.intra_dataflow_analyzer import IntraDataFlowAnalyzer
-from llmtool.dfbscan.step_tracer import StepTracer
-from llmtool.dfbscan.path_validator import PathValidator
-from ui.logger import Logger
-from memory.report.bug_report import BugReport
+from src.llmtool.LLM_tool import *
+from src.llmtool.dfbscan.intra_dataflow_analyzer import IntraDataFlowAnalyzer
+from src.llmtool.dfbscan.step_tracer import StepTracer
+from src.llmtool.dfbscan.path_validator import PathValidator
+from src.ui.logger import Logger
+from src.memory.report.bug_report import BugReport
 
 BASE_PATH = Path(__file__).resolve().parents[2]
 

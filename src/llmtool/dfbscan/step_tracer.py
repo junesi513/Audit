@@ -3,8 +3,8 @@ import json
 from os import path
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
-from llmtool.LLM_tool import *
-from llmtool.LLM_utils import *
+from src.llmtool.LLM_tool import *
+from src.llmtool.LLM_utils import *
 
 BASE_PATH = path.dirname(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 

@@ -1,32 +1,32 @@
-from src.llmtool.LLM_utils import Prompt, LLMResponse
-from src.memory.semantic.state import State
-import json
+from pathlib import Path
+import re
+
+from src.llmtool.LLM_utils import LLM, Prompt, LLMToolOutput
 
 class PatchGenerator:
-    def __init__(self, **kwargs):
-        self.prompt = Prompt(**kwargs)
-        self.tool_name = "PatchGenerator"
+    def __init__(self, model_name: str, language: str, api_key: str = None, **kwargs):
+        self.language = language
+        self.prompt_path = self._get_default_prompt_path()
+        self.prompt = Prompt(self.prompt_path)
+        self.model = LLM(model_name=model_name, api_key=api_key)
 
-    def run(self, **kwargs) -> LLMResponse:
-        """
-        Runs the PatchGenerator tool to generate a patch for a vulnerability.
+    def _get_default_prompt_path(self):
+        base_path = Path(__file__).resolve().parents[3]
+        return f"{base_path}/src/prompt/{self.language.capitalize()}/patcher/patch_generator.json"
 
-        Args:
-            bug_report (dict): The bug report containing details about the vulnerability.
-            func_code (str): The source code of the vulnerable function.
+    def generate(self, function_code: str, bug_report: str) -> LLMToolOutput:
+        prompt_str = self.prompt.get_string_with_inputs({
+            'FUNC_CODE': function_code,
+            'BUG_REPORT': bug_report
+        })
+        raw_output = self.model.generate(prompt_str)
+        return self._post_process(raw_output)
 
-        Returns:
-            LLMResponse: The response from the LLM, containing the patched code.
-        """
-        bug_report: dict = kwargs['bug_report']
-        func_code: str = kwargs['func_code']
+    def _post_process(self, output: str) -> LLMToolOutput:
+        if output:
+            return LLMToolOutput(is_valid=True, output=output)
+        else:
+            return LLMToolOutput(is_valid=False, error_message="LLM returned an empty response.")
 
-        bug_report_str = json.dumps(bug_report, indent=4)
-
-        user_prompt = self.prompt.get_user_prompt(
-            func_code=func_code,
-            bug_report=bug_report_str
-        )
-
-        response = self.prompt.run(user_prompt)
-        return response 
+    def get_text(self, output: LLMToolOutput) -> str:
+        return output.output if output.is_valid else "" 

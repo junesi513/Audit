@@ -2,9 +2,9 @@ import sys
 import os
 from os import path
 from pathlib import Path
-from tstool.analyzer.TS_analyzer import *
-from memory.syntactic.function import *
-from memory.syntactic.value import *
+from src.tstool.analyzer.TS_analyzer import *
+from src.memory.syntactic.function import *
+from src.memory.syntactic.value import *
 import tree_sitter
 import json
 from tqdm import tqdm

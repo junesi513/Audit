@@ -1,6 +1,6 @@
 # Imports
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Any, Dict, List
 import google.generativeai as genai
 import signal
 import sys
@@ -9,59 +9,77 @@ import os
 import concurrent.futures
 from functools import partial
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import json
-from ui.logger import Logger
+from src.ui.logger import Logger
 from openai import OpenAI
 import anthropic
+import openai
+import re
 
+@dataclass
+class LLMToolInput:
+    function_id: str
+    function_code: str
+
+@dataclass
+class LLMToolOutput:
+    is_valid: bool
+    output: Any = None
+    error_message: str = None
 
 class LLM:
     """
     An online inference model using Gemini.
     """
 
-    def __init__(
-        self,
-        model_name: str,
-        temperature: float,
-        system_role: str,
-        logger: Logger
-    ) -> None:
+    def __init__(self, model_name='gemini-1.5-pro-latest', api_key=None, temperature=0.5, max_tokens=2048):
         self.model_name = model_name
         self.temperature = temperature
-        self.system_role = system_role
-        self.logger = logger
-        self.token_num = 0
+        self.max_tokens = max_tokens
 
-        if "gemini" in self.model_name:
-            # As requested, hardcoding the API key directly in the code.
-            api_key = "AIzaSyCWA58IOFNqypP0oENiOK5rvKApirD5P_w"
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(
-                self.model_name,
-                generation_config=genai.types.GenerationConfig(temperature=self.temperature),
-                safety_settings=[ # Disable all safety settings
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                ],
-                system_instruction=self.system_role,
-            )
-        elif "gpt" in self.model_name:
-            if not os.getenv("OPENAI_API_KEY"):
-                raise ValueError("OPENAI_API_KEY environment variable not found.")
-            self.openai_client = OpenAI()
-            self.model = self.model_name
-        elif "claude" in self.model_name:
-            if not os.getenv("ANTHROPIC_API_KEY"):
-                raise ValueError("ANTHROPIC_API_KEY environment variable not found.")
-            self.anthropic_client = anthropic.Anthropic()
-            self.model = self.model_name
+        if 'gemini' in self.model_name.lower():
+            self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+            if not self.api_key:
+                raise ValueError("GOOGLE_API_KEY environment variable not found or is empty.")
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel(self.model_name)
+        elif 'gpt' in self.model_name.lower():
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+            if not self.api_key:
+                raise ValueError("OPENAI_API_KEY environment variable not found or is empty.")
+            self.client = openai.OpenAI(api_key=self.api_key)
         else:
-            raise NotImplementedError(f"Model {self.model_name} is not supported.")
+            raise ValueError(f"Unsupported model: {self.model_name}. Only Gemini and GPT models are supported.")
+
+    def generate(self, prompt: str) -> str:
+        try:
+            if 'gemini' in self.model_name.lower():
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        candidate_count=1,
+                        max_output_tokens=self.max_tokens,
+                        temperature=self.temperature,
+                    ),
+                    # Disabling all safety settings for this specific use case
+                    safety_settings=[
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                    ]
+                )
+                return response.text
+            elif 'gpt' in self.model_name.lower():
+                chat_completion = self.client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=self.model_name,
+                )
+                return chat_completion.choices[0].message.content
+        except Exception as e:
+            return f"An error occurred during LLM generation: {e}"
 
     def infer(
         self, message: str, is_measure_cost: bool = False
@@ -127,25 +145,16 @@ class LLMResponse:
         return self.text
 
 class Prompt:
-    def __init__(self, **kwargs):
-        self.prompt_path = kwargs.get('prompt_path')
-        self.model_name = kwargs.get('model_name')
-        self.api_key = kwargs.get('api_key')
-        self.logger = kwargs.get('logger')
-        self.language = kwargs.get('language')
-        
-        with open(self.prompt_path, 'r') as f:
-            self.prompt_data = json.load(f)
+    def __init__(self, prompt_path: str):
+        with open(prompt_path, 'r') as f:
+            self.template_data = json.load(f)
+        self.template = self.template_data.get("question_template", "")
 
-        self.llm = LLM(
-            model_name=self.model_name,
-            temperature=0.5, # Default temperature
-            system_role=self.prompt_data.get("system_role", ""),
-            logger=self.logger
-        )
-    
-    def get_user_prompt(self, **kwargs):
-        return self.prompt_data["question_template"].format(**kwargs)
+    def get_string_with_inputs(self, inputs: Dict[str, str]) -> str:
+        prompt_str = self.template
+        for key, value in inputs.items():
+            prompt_str = prompt_str.replace(f"<{key}>", value)
+        return prompt_str
 
     def run(self, user_prompt: str) -> LLMResponse:
         response_text, _, _ = self.llm.infer(user_prompt, is_measure_cost=True)

@@ -1,12 +1,12 @@
 from __future__ import annotations
-from llmtool.LLM_utils import *
+from src.llmtool.LLM_utils import *
 from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple
-from ui.logger import Logger
+from src.ui.logger import Logger
 from dataclasses import dataclass
-from memory.syntactic.function import Function
-from memory.syntactic.value import Value
-from llmtool.LLM_utils import LLM
+from src.memory.syntactic.function import Function
+from src.memory.syntactic.value import Value
+from src.llmtool.LLM_utils import LLM, Prompt
 
 
 class LLMToolInput(ABC):
@@ -27,32 +27,24 @@ class LLMToolOutput(ABC):
 
 
 class LLMTool(ABC):
-    def __init__(
-        self,
-        model_name: str,
-        temperature: float,
-        language: str,
-        max_query_num: int,
-        logger: Logger
-    ) -> None:
+    def __init__(self, model_name: str, language: str, api_key: str = None, prompt_path: str = None, **kwargs):
         self.language = language
-        self.model_name = model_name
-        self.temperature = temperature
-        self.language = language
-        self.max_query_num = max_query_num
-        self.logger = logger
+        self.prompt_path = prompt_path or self._get_default_prompt_path()
+        self.prompt = Prompt(self.prompt_path)
+        self.model = LLM(model_name=model_name, api_key=api_key)
 
-        self.model = LLM(
-            model_name=self.model_name,
-            temperature=self.temperature,
-            system_role=self.system_role,
-            logger=self.logger
-        )
+        self.max_query_num = kwargs.get('max_query_num', 10)
+        self.logger = kwargs.get('logger')
+
         self.cache: Dict[LLMToolInput, LLMToolOutput] = {}
 
         self.input_token_cost = 0
         self.output_token_cost = 0
         self.total_query_num = 0
+
+    @abstractmethod
+    def _get_default_prompt_path(self) -> str:
+        raise NotImplementedError
 
     def invoke(self, input: LLMToolInput) -> LLMToolOutput:
         class_name = type(self).__name__
@@ -95,6 +87,10 @@ class LLMTool(ABC):
     def _parse_response(
         self, response: str, input: LLMToolInput = None
     ) -> LLMToolOutput:
+        pass
+
+    def _post_process(self, output: str) -> dict:
+        # ... existing code ...
         pass
 
 

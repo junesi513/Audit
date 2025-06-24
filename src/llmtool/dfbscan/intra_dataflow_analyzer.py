@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
-from llmtool.LLM_tool import *
+from src.llmtool.LLM_tool import *
 
 BASE_PATH = Path(__file__).resolve().parents[3]
 
