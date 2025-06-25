@@ -47,39 +47,56 @@ class SemgrepGenerator:
         return LLMToolOutput(is_valid=False, error_message="Could not extract JSON from LLM output.")
 
     def get_rule(self, output: LLMToolOutput) -> str | None:
-        """Builds the Semgrep rule from a template and the JSON output from the LLM."""
-        if not (output and output.is_valid and 'patterns' in output.output and output.output['patterns']):
+        """Builds a robust Semgrep rule by loading a template and programmatically inserting validated patterns."""
+        if not (output and output.is_valid and output.output):
+            return None
+
+        def is_valid_pattern(p_str: str) -> bool:
+            """A simple validation function to filter out clearly invalid patterns."""
+            if not p_str or not p_str.strip():
+                return False
+            # Filter out patterns that are just single special characters or too short
+            if len(p_str.strip()) <= 2 and not p_str.strip().isalnum():
+                return False
+            return True
+
+        patterns = output.output
+        
+        # Safely get lists, defaulting to an empty list if the key is missing or the value is None.
+        sources = list(filter(is_valid_pattern, patterns.get("source") or []))
+        sinks = list(filter(is_valid_pattern, patterns.get("sink") or []))
+        sanitizers = list(filter(is_valid_pattern, patterns.get("sanitizer") or []))
+
+        # A taint rule is meaningless without at least one valid source and one valid sink.
+        if not sources or not sinks:
+            print("Skipping rule generation: No valid source or sink patterns found after validation.")
             return None
 
         try:
             with open(self.template_path, 'r') as f:
-                template_content = f.read()
+                # Load the base rule structure from the template
+                rule_template = yaml.safe_load(f)
 
-            rule_components = output.output
+            # Prepare pattern dictionaries
+            source_patterns = [{'pattern': p} for p in sources]
+            sink_patterns = [{'pattern': p} for p in sinks]
+            sanitizer_patterns = [{'pattern': p} for p in sanitizers]
             
-            # Safely dump string values to handle special characters
-            rule_id = yaml.dump(rule_components.get('id', 'dynamic-rule-id'))
-            message = yaml.dump(rule_components.get('message', 'Dynamic rule message.'))
-            severity = yaml.dump(rule_components.get('severity', 'WARNING'))
-            
-            # Convert patterns dict to a YAML string with proper indentation
-            patterns_yml = yaml.dump(rule_components['patterns'], indent=4).strip()
-            
-            # Replace placeholders in the template
-            final_rule = template_content.replace('<RULE_ID>', rule_id.strip())
-            final_rule = final_rule.replace('<MESSAGE>', message.strip())
-            final_rule = final_rule.replace('<SEVERITY>', severity.strip())
-            final_rule = final_rule.replace('<PATTERNS>', patterns_yml)
-            
-            # A simple check to ensure it looks like a valid rule
-            yaml.safe_load(final_rule)
+            # Programmatically insert the patterns into the rule structure
+            # Assumes the template has a single rule in the `rules` list
+            rule_template['rules'][0]['pattern-sources'] = source_patterns
+            rule_template['rules'][0]['pattern-sinks'] = sink_patterns
+            rule_template['rules'][0]['pattern-sanitizers'] = sanitizer_patterns
+
+            # Convert the final rule object back to a YAML string
+            final_rule = yaml.dump(rule_template)
 
             return final_rule
         except FileNotFoundError:
             print(f"Error: Template file not found at {self.template_path}")
             return None
-        except (yaml.YAMLError, KeyError) as e:
-            print(f"Error building final rule from template: {e}")
+        except (yaml.YAMLError, KeyError, IndexError) as e:
+            print(f"Error processing rule template or inserting patterns: {e}")
             return None
         except Exception as e:
             print(f"An unexpected error occurred in get_rule: {e}")

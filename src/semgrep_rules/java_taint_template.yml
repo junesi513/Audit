@@ -1,8 +1,10 @@
 rules:
-  - id: <RULE_ID>
+  - id: dynamic-java-taint-rule
     mode: taint
-    message: <MESSAGE>
+    message: "A potential taint flow was detected. Data from a user-controlled source reaches a sensitive sink."
     languages:
       - java
-    severity: <SEVERITY>
-    patterns: <PATTERNS> 
+    severity: ERROR
+    pattern-sources: []
+    pattern-sinks: []
+    pattern-sanitizers: [] 

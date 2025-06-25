@@ -69,26 +69,36 @@ class ConcolicAgent(Agent):
         self.logger.print_console(f"Language '{self.language}' is not supported.", "error")
         return None
 
-    def _run_semgrep_validation(self, semgrep_rule: str, file_path: str) -> bool:
+    def _run_semgrep_validation(self, semgrep_rule: str, file_path: str) -> dict | None:
         rule_path = self.result_dir / "semgrep_rule.yml"
         with open(rule_path, "w") as f:
             f.write(semgrep_rule)
             
         try:
             completed_process = subprocess.run(
-                ["semgrep", "-c", str(rule_path), file_path],
+                ["semgrep", "-c", str(rule_path), file_path, "--json"],
                 capture_output=True,
                 text=True,
-                check=True
+                check=False # Do not raise exception for non-zero exit codes (e.g., when findings are present)
             )
-            # If semgrep finds a match, it returns exit code 0 and non-empty output
-            return completed_process.stdout.strip() != ""
+            
+            if completed_process.returncode not in [0, 1]: # 0 for no findings, 1 for findings
+                self.logger.print_console(f"Semgrep failed with return code {completed_process.returncode}:\n{completed_process.stderr}", "error")
+                return None
+            
+            output_json = json.loads(completed_process.stdout)
+            # Return the findings if any exist
+            return output_json if output_json.get("results") else None
+            
         except FileNotFoundError:
             self.logger.print_console("`semgrep` command not found. Please ensure it is installed.", "error")
-            return False
-        except subprocess.CalledProcessError as e:
-            self.logger.print_console(f"Semgrep failed: {e.stderr}", "error")
-            return False
+            return None
+        except json.JSONDecodeError:
+            self.logger.print_console(f"Failed to parse Semgrep JSON output.", "error")
+            return None
+        except Exception as e:
+            self.logger.print_console(f"An unexpected error occurred during Semgrep validation: {e}", "error")
+            return None
 
     def run(self):
         if self.target_function:
@@ -121,12 +131,17 @@ class ConcolicAgent(Agent):
                 self.logger.print_console(f"Hypothesis generation failed: {llm_output.error_message}", "error")
                 continue
             
-            hypothesis = self.hypothesis_generator.get_hypothesis(llm_output)
+            hypothesis_json = llm_output.output
+            vulnerability_hypothesis = hypothesis_json.get('vulnerability_hypothesis', '')
+
+            if not vulnerability_hypothesis:
+                self.logger.print_console(f"Hypothesis generation failed for function '{func_info.function_name}': Hypothesis is empty.")
+                continue
             
             self.logger.print_console("Generating Semgrep rule...")
             semgrep_rule_str = self.semgrep_generator.generate(
                 function_code=func_info.function_code,
-                vulnerability_hypothesis=hypothesis.get('vulnerability_hypothesis', '')
+                vulnerability_hypothesis=vulnerability_hypothesis
             )
             if not semgrep_rule_str:
                 self.logger.print_console("Semgrep rule generation failed.", "error")
@@ -138,12 +153,21 @@ class ConcolicAgent(Agent):
                 continue
 
             self.logger.print_console(f"Forcing Semgrep validation on {func_info.file_path}...")
-            is_vulnerable = self._run_semgrep_validation(semgrep_rule, func_info.file_path)
+            semgrep_results = self._run_semgrep_validation(semgrep_rule, func_info.file_path)
 
-            if is_vulnerable:
+            if semgrep_results:
                 self.logger.print_console(f"Hypothesis VALIDATED for function '{func_info.function_name}'! Vulnerability confirmed.")
                 vulnerability_found_count += 1
-                cwe_id = hypothesis.get("CWE_ID", "CWE-UNKNOWN") if hypothesis else "CWE-UNKNOWN"
+                
+                # Defensive coding for report generation
+                cwe_id = "CWE-UNKNOWN"
+                if isinstance(hypothesis_json, dict):
+                    cwe_id = hypothesis_json.get("CWE_ID", "CWE-UNKNOWN")
+                
+                report_details = {
+                    "semgrep_findings": semgrep_results.get("results", [])
+                }
+
                 report = BugReport(
                     cwe_id=cwe_id,
                     file_path=func_info.file_path,
@@ -151,7 +175,8 @@ class ConcolicAgent(Agent):
                     start_line=func_info.start_line_number,
                     end_line=func_info.end_line_number,
                     function_code=func_info.function_code,
-                    language=self.language
+                    language=self.language,
+                    details=report_details
                 )
                 report.dump(self.result_dir, f"bug_report_{func_info.function_name}.json")
             else:

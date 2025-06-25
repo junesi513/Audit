@@ -8,6 +8,7 @@ from dataclasses import dataclass
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
 from src.llmtool.LLM_utils import LLM, Prompt, LLMToolOutput, LLMToolInput
+from src.llmtool.LLM_tool import LLMTool
 
 @dataclass
 class HypothesisGeneratorInput(LLMToolInput):
@@ -36,25 +37,30 @@ class HypothesisGenerator:
         base_path = Path(__file__).resolve().parents[3]
         return f"{base_path}/src/prompt/{self.language.capitalize()}/concolic/hypothesis_generator.json"
 
-    def generate(self, function_code: str) -> LLMToolOutput:
-        prompt_str = self.prompt.get_string_with_inputs({'FUNC_CODE': function_code})
+    def generate(self, function_code: str, previous_error: str = None) -> LLMToolOutput:
+        inputs = {
+            'FUNC_CODE': function_code,
+        }
+        if previous_error:
+            inputs['PREVIOUS_ERROR'] = previous_error
+
+        prompt_str = self.prompt.get_string_with_inputs(inputs)
         raw_output = self.model.generate(prompt_str)
         return self._post_process(raw_output)
 
-    def _post_process(self, output: str) -> LLMToolOutput:
+    def _post_process(self, llm_response_content: str) -> LLMToolOutput:
+        """Processes the raw LLM output string to extract the vulnerability hypothesis as JSON."""
         try:
-            # The JSON content is assumed to be within ```json ... ```
-            json_match = re.search(r"```json\n(.*?)\n```", output, re.DOTALL)
+            json_match = re.search(r"```json\n(.*?)\n```", llm_response_content, re.DOTALL)
             if json_match:
-                json_str = json_match.group(1)
-                parsed_json = json.loads(json_str)
-                return LLMToolOutput(is_valid=True, output=parsed_json)
+                json_content = json_match.group(1).strip()
+                parsed_json = json.loads(json_content)
+                # Ensure the essential key exists
+                if 'vulnerability_hypothesis' in parsed_json:
+                    return LLMToolOutput(is_valid=True, output=parsed_json)
         except json.JSONDecodeError as e:
-            return LLMToolOutput(is_valid=False, error_message=f"JSONDecodeError: {e}")
+            return LLMToolOutput(is_valid=False, error_message=f"LLM produced invalid JSON: {e}")
         except Exception as e:
-            return LLMToolOutput(is_valid=False, error_message=f"An unexpected error occurred: {e}")
+            return LLMToolOutput(is_valid=False, error_message=f"An unexpected error occurred during post-processing: {e}")
         
-        return LLMToolOutput(is_valid=False, error_message="Could not extract JSON from LLM output.")
-
-    def get_hypothesis(self, output: LLMToolOutput):
-        return output.output if output.is_valid else None
+        return LLMToolOutput(is_valid=False, error_message="Could not extract a valid hypothesis JSON from LLM output.")

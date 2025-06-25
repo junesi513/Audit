@@ -13,6 +13,7 @@ class BugReport:
         function_code: str,
         language: str,
         explanation: str = "N/A",
+        details: dict = None,
     ) -> None:
         """
         :param cwe_id: the CWE ID
@@ -23,6 +24,7 @@ class BugReport:
         :param function_code: the function code
         :param language: the language
         :param explanation: the explanation
+        :param details: A dictionary containing detailed information about the vulnerability (e.g., source, sink)
         """
         self.cwe_id = cwe_id
         self.file_path = file_path
@@ -32,6 +34,7 @@ class BugReport:
         self.function_code = function_code
         self.language = language
         self.explanation = explanation
+        self.details = details or {}
 
     def to_dict(self) -> dict:
         return {
@@ -43,6 +46,7 @@ class BugReport:
             "function_code": self.function_code,
             "language": self.language,
             "explanation": self.explanation,
+            "details": self.details,
         }
 
     def dump(self, output_dir: Path, filename: str = "bug_report.json"):
