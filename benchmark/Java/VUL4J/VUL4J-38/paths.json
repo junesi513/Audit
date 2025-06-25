@@ -1,0 +1,4 @@
+{
+  "AbstractUrlBasedTicketValidator.java": "cas-client-core/src/main/java/org/jasig/cas/client/validation/AbstractUrlBasedTicketValidator.java",
+  "Cas20ServiceTicketValidator.java": "cas-client-core/src/main/java/org/jasig/cas/client/validation/Cas20ServiceTicketValidator.java"
+}

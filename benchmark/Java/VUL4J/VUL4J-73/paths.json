@@ -1,0 +1,3 @@
+{
+  "PlaintextPasswordEncoder.java": "core/src/main/java/org/springframework/security/authentication/encoding/PlaintextPasswordEncoder.java"
+}

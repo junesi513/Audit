@@ -45,8 +45,8 @@ class BugReport:
             "explanation": self.explanation,
         }
 
-    def dump(self, output_dir: Path):
-        report_path = output_dir / "bug_report.json"
+    def dump(self, output_dir: Path, filename: str = "bug_report.json"):
+        report_path = output_dir / filename
         with report_path.open('w') as f:
             json.dump(self.to_dict(), f, indent=4)
 

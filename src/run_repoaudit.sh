@@ -2,11 +2,11 @@
 SCAN_TYPE=$1
 LANGUAGE=Java
 MODEL=gemini-1.5-pro-latest
-BUG_TYPE=VUL4J-1
+BUG_TYPE=NPD
 PROJECT=VUL4J
 
 # For demo/test run
-python3 repoaudit.py \
+python3 ../repoaudit.py \
     --language $LANGUAGE \
     --model-name $MODEL \
     --project-path ../benchmark/${LANGUAGE}/${PROJECT} \

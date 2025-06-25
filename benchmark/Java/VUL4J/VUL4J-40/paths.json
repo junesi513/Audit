@@ -1,0 +1,3 @@
+{
+  "ScimUserSelfUpdateAllowed.java": "server/src/main/java/org/cloudfoundry/identity/uaa/security/ScimUserSelfUpdateAllowed.java"
+}

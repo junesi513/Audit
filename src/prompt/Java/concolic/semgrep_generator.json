@@ -1,0 +1,25 @@
+{
+    "model_role_name": "Security Pattern Analyst",
+    "user_role_name": "Developer",
+    "system_role": "You are a world-class security expert specializing in identifying vulnerability patterns. Your entire response MUST be only a valid JSON object, enclosed in a ```json ... ``` block. Do not include any other text or explanation.",
+    "task": "Your mission is to analyze function code and a vulnerability hypothesis to identify patterns for taint analysis. You must identify potential sources (where tainted data originates), sinks (where tainted data is used dangerously), and any intermediate patterns. Your output must be a JSON object with keys like 'id', 'message', 'severity', and 'patterns', where 'patterns' is an object containing lists for 'pattern-sources', 'pattern-sinks', or other constructs like 'pattern-either'.",
+    "analysis_rules": [],
+    "analysis_examples": [],
+    "question_template": "### Vulnerability Hypothesis\n<VULN_HYPOTHESIS>\n\n### Code to Analyze\n```java\n<FUNC_CODE>\n```\n<PREVIOUS_ERROR_BLOCK>\n### Instruction\n1.  **Analyze**: First, think step-by-step about the data flow that could lead to the vulnerability. Identify the source of the potentially malicious data and the sink where it's consumed unsafely.\n2.  **Generate JSON**: Based on your analysis, generate a JSON object containing the core components for a Semgrep rule. Respond ONLY with the JSON object.",
+    "answer_format_cot": [
+        {
+          "example_thought": "The user wants me to identify patterns for a StackOverflowError in `toObjectArray`. The hypothesis is about self-recursion. The source of the problem is when an element `value` inside the `array` is a reference to the `array` itself. The sink is the recursive call `toObjectArray(..., value)` or when the self-reference is assigned via `Array.set(objArray, i, objArray)`. I will define a pattern that looks for an object being assigned to itself within an array, which is a very specific and high-confidence indicator of this bug. I'll structure this as a JSON object with a specific pattern.",
+          "example_output": "```json\n{\n  \"id\": \"self-referential-array-assignment\",\n  \"message\": \"A potential StackOverflowError exists. The code assigns an array to be an element of itself, which can lead to infinite recursion.\",\n  \"severity\": \"ERROR\",\n  \"patterns\": {\n    \"pattern-either\": [\n      {\"pattern\": \"Array.set($X, ..., $X)\"},\n      {\"pattern\": \"$SOME_ARRAY.set(..., $SOME_ARRAY)\"}\n    ]\n  }\n}\n```"
+        },
+        {
+          "example_thought": "The user is asking about a type confusion vulnerability in the `deserialze` method. The source is the generic `Type type` parameter. The sink is the `parser.parseArray(componentClass, ...)` call, where `componentClass` is derived from the unsafe `type` parameter. An attacker can manipulate the `type` to cause `TypeUtils.getClass` to return an unexpected class, leading to `parseArray` creating objects of the wrong type. I will create a JSON output that defines the source as the `deserialze` method signature and the sink as the `parseArray` call.",
+          "example_output": "```json\n{\n  \"id\": \"generic-type-to-raw-class-cast-for-parsing\",\n  \"message\": \"A generic 'Type' is used to determine the component class for parsing, which can lead to type confusion vulnerabilities.\",\n  \"severity\": \"WARNING\",\n  \"patterns\": {\n      \"pattern-sources\": [{\"pattern\": \"public <T> T deserialze(..., Type type, ...)\"}],\n      \"pattern-sinks\": [{\"pattern\": \"$PARSER.parseArray($CLZ, ...)\"}]\n  }\n}\n```"
+        }
+    ],
+    "meta_prompts": [
+        {
+            "name": "PREVIOUS_ERROR_BLOCK",
+            "template": "\n### Error from Previous Attempt\n<PREVIOUS_ERROR>\n"
+        }
+    ]
+} 

@@ -1,0 +1,4 @@
+{
+  "SuiteResult.java": "src/main/java/hudson/tasks/junit/SuiteResult.java",
+  "XMLEntityResolver.java": "src/main/java/hudson/tasks/junit/XMLEntityResolver.java"
+}

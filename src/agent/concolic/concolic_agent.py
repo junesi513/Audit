@@ -5,6 +5,7 @@ import pprint
 
 from src.agent.agent import Agent
 from src.llmtool.concolic.hypothesis_generator import HypothesisGenerator
+from src.llmtool.concolic.semgrep_generator import SemgrepGenerator
 from src.memory.report.bug_report import BugReport
 from src.tstool.analyzer import JavaTSAnalyzer
 from src.ui.logger import Logger
@@ -30,6 +31,11 @@ class ConcolicAgent(Agent):
         self.hypothesis_generator = HypothesisGenerator(
             model_name=self.model_name,
             language=self.language,
+            api_key=self.api_key
+        )
+        self.semgrep_generator = SemgrepGenerator(
+            language=self.language,
+            model_name=self.model_name,
             api_key=self.api_key
         )
         
@@ -63,61 +69,95 @@ class ConcolicAgent(Agent):
         self.logger.print_console(f"Language '{self.language}' is not supported.", "error")
         return None
 
-    def _run_semgrep_validation(self, target_file_path: str) -> bool:
-        # This is a simplified validation. A real implementation would need more robust rule management.
-        rule_path = "src/semgrep_rules/cwe20-validation.yml" # This is incorrect for CWE-502 but only for demo
-        command = ["semgrep", "--config", rule_path, "--json", target_file_path]
-        
+    def _run_semgrep_validation(self, semgrep_rule: str, file_path: str) -> bool:
+        rule_path = self.result_dir / "semgrep_rule.yml"
+        with open(rule_path, "w") as f:
+            f.write(semgrep_rule)
+            
         try:
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            semgrep_output = json.loads(result.stdout)
-            return bool(semgrep_output.get("results"))
+            completed_process = subprocess.run(
+                ["semgrep", "-c", str(rule_path), file_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            # If semgrep finds a match, it returns exit code 0 and non-empty output
+            return completed_process.stdout.strip() != ""
         except FileNotFoundError:
             self.logger.print_console("`semgrep` command not found. Please ensure it is installed.", "error")
+            return False
         except subprocess.CalledProcessError as e:
             self.logger.print_console(f"Semgrep failed: {e.stderr}", "error")
-        except json.JSONDecodeError:
-            self.logger.print_console("Failed to parse Semgrep output.", "error")
-        return False
+            return False
 
     def run(self):
-        self.logger.print_console(f"Start Concolic Scanning for function '{self.target_function}'...")
+        if self.target_function:
+            self.logger.print_console(f"Start Concolic Scanning for function '{self.target_function}'...")
+        else:
+            self.logger.print_console(f"Start Concolic Scanning for all functions...")
+
         analyzer = self._get_analyzer()
         if not analyzer: return
 
-        target_function_info = analyzer.find_function_by_name(self.target_function)
-        if not target_function_info:
-            self.logger.print_console(f"Target function '{self.target_function}' not found.")
-            return
-
-        self.logger.print_console(f"Generating vulnerability hypothesis for: {target_function_info['name']}")
-        llm_output = self.hypothesis_generator.generate(function_code=target_function_info['code'])
-        
-        if not llm_output.is_valid:
-            self.logger.print_console(f"Hypothesis generation failed: {llm_output.error_message}", "error")
-            return
-        
-        hypothesis = self.hypothesis_generator.get_hypothesis(llm_output)
-        cwe_id = hypothesis.get("CWE_ID", "CWE-UNKNOWN") if hypothesis else "CWE-UNKNOWN"
-        
-        self.logger.print_console("Forcing Semgrep validation...")
-        is_vulnerable = self._run_semgrep_validation(target_function_info['file_path'])
-
-        if is_vulnerable:
-            self.logger.print_console("Hypothesis VALIDATED! Vulnerability confirmed by Semgrep.")
-            report = BugReport(
-                cwe_id=cwe_id,
-                file_path=target_function_info['file_path'],
-                function_name=target_function_info['name'],
-                start_line=target_function_info['start_line'],
-                end_line=target_function_info['end_line'],
-                function_code=target_function_info['code'],
-                language=self.language
-            )
-            report.dump(self.result_dir)
-            self.logger.print_console(f"1 bug(s) were detected.")
+        if self.target_function:
+            functions_to_analyze = [analyzer.find_function_by_name(self.target_function)]
+            if not functions_to_analyze[0]:
+                self.logger.print_console(f"Target function '{self.target_function}' not found.")
+                return
         else:
-            self.logger.print_console("Hypothesis REJECTED. Vulnerability not confirmed by Semgrep.")
+            functions_to_analyze = analyzer.function_env.values()
+        
+        vulnerability_found_count = 0
+        
+        for func_info in functions_to_analyze:
+            if not func_info: continue
+
+            self.logger.print_console(f"Analyzing function: {func_info.function_name} in {func_info.file_path}")
+
+            self.logger.print_console(f"Generating vulnerability hypothesis for: {func_info.function_name}")
+            llm_output = self.hypothesis_generator.generate(function_code=func_info.function_code)
+            
+            if not llm_output.is_valid:
+                self.logger.print_console(f"Hypothesis generation failed: {llm_output.error_message}", "error")
+                continue
+            
+            hypothesis = self.hypothesis_generator.get_hypothesis(llm_output)
+            
+            self.logger.print_console("Generating Semgrep rule...")
+            semgrep_rule_str = self.semgrep_generator.generate(
+                function_code=func_info.function_code,
+                vulnerability_hypothesis=hypothesis.get('vulnerability_hypothesis', '')
+            )
+            if not semgrep_rule_str:
+                self.logger.print_console("Semgrep rule generation failed.", "error")
+                continue
+            
+            semgrep_rule = self.semgrep_generator.get_rule(semgrep_rule_str)
+            if not semgrep_rule:
+                self.logger.print_console(f"Skipping Semgrep validation for function '{func_info.function_name}' due to rule generation failure.")
+                continue
+
+            self.logger.print_console(f"Forcing Semgrep validation on {func_info.file_path}...")
+            is_vulnerable = self._run_semgrep_validation(semgrep_rule, func_info.file_path)
+
+            if is_vulnerable:
+                self.logger.print_console(f"Hypothesis VALIDATED for function '{func_info.function_name}'! Vulnerability confirmed.")
+                vulnerability_found_count += 1
+                cwe_id = hypothesis.get("CWE_ID", "CWE-UNKNOWN") if hypothesis else "CWE-UNKNOWN"
+                report = BugReport(
+                    cwe_id=cwe_id,
+                    file_path=func_info.file_path,
+                    function_name=func_info.function_name,
+                    start_line=func_info.start_line_number,
+                    end_line=func_info.end_line_number,
+                    function_code=func_info.function_code,
+                    language=self.language
+                )
+                report.dump(self.result_dir, f"bug_report_{func_info.function_name}.json")
+            else:
+                self.logger.print_console(f"Hypothesis REJECTED for function '{func_info.function_name}'.")
+
+        self.logger.print_console(f"Scan finished. {vulnerability_found_count} bug(s) were detected.")
 
     def get_agent_state(self):
         return None

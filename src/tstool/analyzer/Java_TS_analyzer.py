@@ -1,5 +1,5 @@
 import tree_sitter
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Dict, Set, Optional
 
 from src.tstool.analyzer.TS_analyzer import *
 from src.memory.syntactic.function import *
@@ -417,25 +417,25 @@ class JavaTSAnalyzer(TSAnalyzer):
 
         return list(set(assignments)) # Return unique assignments
 
-    def find_function_by_name(self, function_name: str) -> dict:
-        """Finds a function by its name and returns its details."""
-        if not function_name: return None
-        for function in self.function_env.values():
-            if function.function_name == function_name:
-                return {
-                    'name': function.function_name,
-                    'code': function.function_code,
-                    'file_path': function.file_path,
-                    'start_line': function.start_line_number,
-                    'end_line': function.end_line_number,
-                }
+    def find_function_by_name(self, function_name: str) -> Optional[Function]:
+        """
+        Finds a function by its name and returns its details as a dictionary.
+        This is a simplified example; in a real scenario, you might need to handle overloads.
+        """
+        if function_name in self.functionNameToId:
+            # Assuming the first match is the desired one for simplicity
+            func_id = self.functionNameToId[function_name][0]
+            if func_id in self.function_env:
+                return self.function_env[func_id]
         return None
 
     def get_function_source_code(self, function_name: str) -> str:
-        """Retrieves the source code of a function by its name."""
+        """
+        Retrieve the source code of a function by its name.
+        """
         function_info = self.find_function_by_name(function_name)
         if function_info:
-            return function_info['code']
+            return function_info.function_code
         return ""
     
     def get_all_imports(self) -> list:

@@ -1,39 +1,36 @@
 import sys
 import json
 from os import path
+from pathlib import Path
 sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
 
 from src.llmtool.LLM_tool import *
 from src.llmtool.LLM_utils import *
 
-BASE_PATH = path.dirname(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
+BASE_PATH = Path(__file__).resolve().parent.parent.parent
 
 class StepTracer(LLMTool):
+    def _get_default_prompt_path(self) -> str:
+        return f"{BASE_PATH}/prompt/{self.language.capitalize()}/dfbscan/step_tracer.json"
+
     def __init__(
         self,
         model_name: str,
-        temperature: float,
         language: str,
-        max_query_num: int,
-        logger: Logger,
+        **kwargs
     ) -> None:
-        super().__init__(model_name, temperature, language, max_query_num, logger)
-        # Load prompt from json file directly
-        prompt_path = f"{BASE_PATH}/src/prompt/{language.capitalize()}/dfbscan/step_tracer.json"
-        with open(prompt_path, 'r') as f:
-            prompt_data = json.load(f)
-        self.prompt_template = prompt_data["question_template"]
+        super().__init__(model_name, language, **kwargs)
 
     def _get_prompt(self, input: StepTracerInput) -> str:
         """
         Formats the prompt with the source variable and code snippet.
         """
-        return self.prompt_template.format(
+        return self.prompt.get("question_template").format(
             SRC_NAME=input.variable.name,
             CODE_SNIPPET=input.code_snippet,
         )
 
-    def _parse_response(self, response: str) -> StepTracerOutput:
+    def _parse_response(self, response: str, input: LLMToolInput = None) -> StepTracerOutput:
         """
         Parses the LLM's response to extract the next variable name.
         """

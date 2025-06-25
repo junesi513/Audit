@@ -1,0 +1,8 @@
+{
+  "Setup.java": "arquillian/arquillian-tomee-common/src/main/java/org/apache/openejb/arquillian/common/Setup.java",
+  "TomEEConfiguration.java": "arquillian/arquillian-tomee-common/src/main/java/org/apache/openejb/arquillian/common/TomEEConfiguration.java",
+  "EmbeddedTomEEConfiguration.java": "arquillian/arquillian-tomee-embedded/src/main/java/org/apache/openejb/arquillian/embedded/EmbeddedTomEEConfiguration.java",
+  "BlacklistClassResolver.java": "container/openejb-core/src/main/java/org/apache/openejb/core/rmi/BlacklistClassResolver.java",
+  "EjbObjectInputStream.java": "server/openejb-client/src/main/java/org/apache/openejb/client/EjbObjectInputStream.java",
+  "Installer.java": "tomee/tomee-common/src/main/java/org/apache/tomee/installer/Installer.java"
+}

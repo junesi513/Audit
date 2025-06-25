@@ -1,0 +1,4 @@
+{
+  "AnnotationRevisionMetadata.java": "src/main/java/org/springframework/data/history/AnnotationRevisionMetadata.java",
+  "PropertyPath.java": "src/main/java/org/springframework/data/mapping/PropertyPath.java"
+}

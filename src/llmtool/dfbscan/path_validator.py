@@ -35,75 +35,33 @@ class PathValidatorOutput(LLMToolOutput):
 
     def __str__(self):
         return (
-            f"Is reachable: {self.is_reachable} \nExplanation: {self.explanation_str}"
+            f"Is reachable: {self.is_reachable} \\nExplanation: {self.explanation_str}"
         )
 
 
 class PathValidator(LLMTool):
-    def __init__(
-        self,
-        model_name: str,
-        temperature: float,
-        language: str,
-        max_query_num: int,
-        logger: Logger,
-    ) -> None:
-        """
-        :param model_name: the model name
-        :param temperature: the temperature
-        :param language: the programming language
-        :param max_query_num: the maximum number of queries if the model fails
-        :param logger: the logger
-        """
-        super().__init__(model_name, temperature, language, max_query_num, logger)
-        self.prompt_file = f"{BASE_PATH}/prompt/{language}/dfbscan/path_validator.json"
-        return
+    def _get_default_prompt_path(self) -> str:
+        return f"{BASE_PATH}/prompt/{self.language.capitalize()}/dfbscan/path_validator.json"
+
+    def __init__(self, model_name: str, language: str, **kwargs) -> None:
+        super().__init__(model_name, language, **kwargs)
 
     def _get_prompt(self, input: PathValidatorInput) -> str:
-        with open(self.prompt_file, "r") as f:
-            prompt_template_dict = json.load(f)
-        prompt = prompt_template_dict["task"]
-        prompt += "\n" + "\n".join(prompt_template_dict["analysis_rules"])
-        prompt += "\n" + "\n".join(prompt_template_dict["analysis_examples"])
-        prompt += "\n" + "".join(prompt_template_dict["meta_prompts"])
-        prompt = prompt.replace(
-            "<ANSWER>", "\n".join(prompt_template_dict["answer_format"])
-        ).replace("<QUESTION>", "\n".join(prompt_template_dict["question_template"]))
-
-        value_lines = []
-        for value in input.values:
-            value_line = " - " + str(value)
-            function = input.values_to_functions.get(value)
-            if function is None:
-                continue
-            value_line += (
-                " in the function "
-                + function.function_name
-                + " at the line "
-                + str(value.line_number - function.start_line_number + 1)
-            )
-            value_lines.append(value_line)
-        prompt = prompt.replace("<PATH>", "\n".join(value_lines))
-        prompt = prompt.replace("<BUG_TYPE>", input.bug_type)
-
-        program = "\n".join(
-            [
-                "```\n" + func.lined_code + "\n```\n"
-                for func in input.values_to_functions.values()
-            ]
+        path_str = " -> ".join([f"{v.name}:{v.start_line}" for v in input.values])
+        return self.prompt.get("question_template").format(
+            BUG_TYPE=input.bug_type,
+            PATH_STR=path_str,
+            FUNCS_CODE="\\n".join([f.source_code for f in input.values_to_functions.values()])
         )
-        prompt = prompt.replace("<PROGRAM>", program)
-        return prompt
 
-    def _parse_response(
-        self, response: str, input: PathValidatorInput
-    ) -> PathValidatorOutput:
-        answer_match = re.search(r"Answer:\s*(\w+)", response)
-        if answer_match:
-            answer = answer_match.group(1).strip()
-            output = PathValidatorOutput(answer == "Yes", response)
-            self.logger.print_log("Output of path_validator:\n", str(output))
-        else:
-            self.logger.print_log(f"Answer not found in output")
-            output = None
-        return output
+    def _parse_response(self, response: str, input: LLMToolInput = None) -> PathValidatorOutput:
+        try:
+            # Assuming the response is a JSON string like '{"is_reachable": true, "explanation": "..."}'
+            data = json.loads(response)
+            is_reachable = data.get("is_reachable", False)
+            explanation = data.get("explanation", "")
+            return PathValidatorOutput(is_reachable=is_reachable, explanation_str=explanation)
+        except (json.JSONDecodeError, AttributeError):
+            # Fallback for non-JSON or malformed responses
+            is_reachable = "yes" in response.lower()
+            return PathValidatorOutput(is_reachable=is_reachable, explanation_str=response)

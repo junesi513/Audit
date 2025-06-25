@@ -1,0 +1,4 @@
+{
+  "XSSAPIImpl.java": "bundles/extensions/xss/src/main/java/org/apache/sling/xss/impl/XSSAPIImpl.java",
+  "MicrodataClient.java": "testing/http/clients/src/main/java/org/apache/sling/testing/clients/html/MicrodataClient.java"
+}

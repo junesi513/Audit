@@ -1,0 +1,5 @@
+{
+  "InputProcessorChain.java": "src/main/java/org/apache/xml/security/stax/ext/InputProcessorChain.java",
+  "InputProcessorChainImpl.java": "src/main/java/org/apache/xml/security/stax/impl/InputProcessorChainImpl.java",
+  "XMLSecurityInputProcessor.java": "src/main/java/org/apache/xml/security/stax/impl/processor/input/XMLSecurityInputProcessor.java"
+}

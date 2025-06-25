@@ -1,0 +1,3 @@
+{
+  "JwtIssuerValidator.java": "oauth2/oauth2-jose/src/main/java/org/springframework/security/oauth2/jwt/JwtIssuerValidator.java"
+}

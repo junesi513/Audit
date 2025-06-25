@@ -410,8 +410,9 @@ class TSAnalyzer(ABC):
                 tmp_api = API(-1, callee_name, len(arguments))
 
                 # Insert the API into the API environment if it does not exist previously
-                for single_api_id in self.api_env:
-                    if self.api_env[single_api_id] == tmp_api:
+                for single_api_id in list(self.api_env):
+                    api = self.api_env[single_api_id]
+                    if api == tmp_api:
                         api_id = single_api_id
                 if api_id == None:
                     self.api_env[len(self.api_env)] = API(

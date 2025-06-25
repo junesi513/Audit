@@ -1,0 +1,4 @@
+{
+  "FileUploadBase.java": "src/main/java/org/apache/commons/fileupload/FileUploadBase.java",
+  "MultipartStream.java": "src/main/java/org/apache/commons/fileupload/MultipartStream.java"
+}

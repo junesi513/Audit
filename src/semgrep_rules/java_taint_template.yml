@@ -1,0 +1,8 @@
+rules:
+  - id: <RULE_ID>
+    mode: taint
+    message: <MESSAGE>
+    languages:
+      - java
+    severity: <SEVERITY>
+    patterns: <PATTERNS> 

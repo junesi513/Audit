@@ -1,0 +1,4 @@
+{
+  "SubversionRepositoryStatus.java": "src/main/java/hudson/scm/SubversionRepositoryStatus.java",
+  "SubversionStatus.java": "src/main/java/hudson/scm/SubversionStatus.java"
+}

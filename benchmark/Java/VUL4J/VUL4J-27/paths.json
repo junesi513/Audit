@@ -1,0 +1,5 @@
+{
+  "CookieInterceptor.java": "core/src/main/java/org/apache/struts2/interceptor/CookieInterceptor.java",
+  "ExcludedPatterns.java": "xwork-core/src/main/java/com/opensymphony/xwork2/ExcludedPatterns.java",
+  "ParametersInterceptor.java": "xwork-core/src/main/java/com/opensymphony/xwork2/interceptor/ParametersInterceptor.java"
+}

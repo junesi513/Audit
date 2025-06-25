@@ -1,0 +1,4 @@
+{
+  "AddOperation.java": "spring-data-rest-webmvc/src/main/java/org/springframework/data/rest/webmvc/json/patch/AddOperation.java",
+  "PatchOperation.java": "spring-data-rest-webmvc/src/main/java/org/springframework/data/rest/webmvc/json/patch/PatchOperation.java"
+}

@@ -67,13 +67,20 @@ class DFBScanAgent(Agent):
             self.res_dir_path = f"{BASE_PATH}/result/dfbscan/{self.model_name}/{self.bug_type}/{self.language}/{self.project_name}/{log_timestamp}-{agent_id}"
             if not os.path.exists(self.log_dir_path):
                 os.makedirs(self.log_dir_path)
-            self.logger = Logger(self.log_dir_path + "/" + "dfbscan.log")
+            self.logger = Logger("dfbscan_agent", self.log_dir_path + "/" + "dfbscan.log")
             if not os.path.exists(self.res_dir_path):
                 os.makedirs(self.res_dir_path)
 
-        self.step_tracer = StepTracer(self.model_name, self.temperature, self.language, self.MAX_QUERY_NUM, self.logger)
-        self.intra_dfa = IntraDataFlowAnalyzer(self.model_name, self.temperature, self.language, self.MAX_QUERY_NUM, self.logger, self.bug_type)
-        self.path_validator = PathValidator(self.model_name, self.temperature, self.language, self.MAX_QUERY_NUM, self.logger)
+        llm_kwargs = {
+            'temperature': self.temperature,
+            'max_query_num': self.MAX_QUERY_NUM,
+            'logger': self.logger,
+            'api_key': os.getenv("GOOGLE_API_KEY") 
+        }
+
+        self.step_tracer = StepTracer(self.model_name, self.language, **llm_kwargs)
+        self.intra_dfa = IntraDataFlowAnalyzer(self.model_name, self.language, self.bug_type, **llm_kwargs)
+        self.path_validator = PathValidator(self.model_name, self.language, **llm_kwargs)
         
         self.ts_analyzer.analyze_call_graph()
         extractor = self.__obtain_extractor()
@@ -144,7 +151,7 @@ class DFBScanAgent(Agent):
         
         # ... (process the output and generate reports)
         
-    def start_scan(self) -> None:
+    def run(self) -> None:
         self.logger.print_console("Start data-flow bug scanning in parallel...")
         self.logger.print_console(f"Max number of workers: {self.max_neural_workers}")
         
