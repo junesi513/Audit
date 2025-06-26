@@ -49,18 +49,24 @@ class HypothesisGenerator:
         return self._post_process(raw_output)
 
     def _post_process(self, llm_response_content: str) -> LLMToolOutput:
-        """Processes the raw LLM output string to extract the vulnerability hypothesis as JSON."""
-        try:
-            json_match = re.search(r"```json\n(.*?)\n```", llm_response_content, re.DOTALL)
-            if json_match:
-                json_content = json_match.group(1).strip()
-                parsed_json = json.loads(json_content)
-                # Ensure the essential key exists
-                if 'vulnerability_hypothesis' in parsed_json:
-                    return LLMToolOutput(is_valid=True, output=parsed_json)
-        except json.JSONDecodeError as e:
-            return LLMToolOutput(is_valid=False, error_message=f"LLM produced invalid JSON: {e}")
-        except Exception as e:
-            return LLMToolOutput(is_valid=False, error_message=f"An unexpected error occurred during post-processing: {e}")
+        """Processes the raw LLM output string to extract the hypothesis as JSON."""
         
-        return LLMToolOutput(is_valid=False, error_message="Could not extract a valid hypothesis JSON from LLM output.")
+        json_str = None
+        # First, try to find a JSON block specifically marked with ```json
+        json_match = re.search(r"```json\n(.*?)\n```", llm_response_content, re.DOTALL)
+            if json_match:
+            json_str = json_match.group(1).strip()
+        else:
+            # If no marked block is found, assume the whole response might be a JSON object.
+            # This is a fallback for when the LLM doesn't use the markdown markers.
+            json_str = llm_response_content.strip()
+
+        try:
+                parsed_json = json.loads(json_str)
+            return LLMToolOutput(is_valid=True, output=parsed_json, raw_output=llm_response_content)
+        except json.JSONDecodeError as e:
+            return LLMToolOutput(is_valid=False, error_message=f"LLM produced invalid JSON: {e}. Raw content: {llm_response_content}", raw_output=llm_response_content)
+        except Exception as e:
+            return LLMToolOutput(is_valid=False, error_message=f"An unexpected error occurred during post-processing: {e}", raw_output=llm_response_content)
+        
+        return LLMToolOutput(is_valid=False, error_message="Could not extract JSON from LLM output.", raw_output=llm_response_content)

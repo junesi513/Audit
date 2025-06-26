@@ -45,19 +45,27 @@ class Logger:
     def print_log(self, *args: Any) -> None:
         """
         Output messages to log file only.
-
-        Args:
-            *args: Message parts to be logged, which are merged into a single string.
+        The last argument can optionally be a log level string ('debug', 'info', 'warning', 'error').
         """
+        if not args:
+            return
+
+        level = 'info'
+        message_parts = list(args)
+
+        if isinstance(args[-1], str) and args[-1].upper() in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
+            level = args[-1].lower()
+            message_parts.pop()
+        
+        message = " ".join(map(str, message_parts))
+
         with self._log_lock:
-            # Remove the console handler if it exists, so the message is logged only to file
             if self.console_handler in self.logger.handlers:
                 self.logger.removeHandler(self.console_handler)
             
-            message = " ".join(map(str, args))
-            self.logger.info(message)
+            log_method = getattr(self.logger, level, self.logger.info)
+            log_method(message)
 
-            # Add the console handler back for future console logs
             if self.console_handler not in self.logger.handlers:
                 self.logger.addHandler(self.console_handler)
 
@@ -73,3 +81,6 @@ class Logger:
                 self.logger.debug(message)
             else:
                 self.logger.info(message) # Default to info
+
+# Global logger instance for easy access from other modules
+ui_logger = Logger(name="RepoAudit", log_file="log/repoaudit_ui.log")

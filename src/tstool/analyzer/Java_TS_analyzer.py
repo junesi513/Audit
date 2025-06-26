@@ -1,446 +1,226 @@
+from os import path
+import sys
+from typing import Dict, List, Set, Tuple
+
 import tree_sitter
-from typing import List, Tuple, Dict, Set, Optional
 
-from src.tstool.analyzer.TS_analyzer import *
-from src.memory.syntactic.function import *
-from src.memory.syntactic.value import *
+from src.tstool.analyzer.ts_analyzer import TSAnalyzer, find_nodes_by_type
+from src.memory.syntactic.function import Function
+from src.memory.syntactic.value import Value, ValueLabel
 
+sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
 
 class JavaTSAnalyzer(TSAnalyzer):
-    """
-    TSAnalyzer for Java source files using tree-sitter.
-    Implements Java-specific parsing and analysis.
-    """
+    def __init__(self, code_in_files: dict = None):
+        super().__init__(code_in_files, "Java")
+
+    def find_nodes_by_type(self, node, node_type):
+        return find_nodes_by_type(node, node_type)
 
     def extract_function_info(
         self, file_path: str, source_code: str, tree: tree_sitter.Tree
     ) -> None:
-        """
-        Parse method declarations as function definitions.
-        This query aims to find all method declarations, regardless of annotations or class body context.
-        """
         query_str = """
         (method_declaration
-            (modifiers) @mods
-            name: (identifier) @name) @method
+            name: (identifier) @name
+        ) @method
         """
-        
         query = self.language.query(query_str)
-        
         captures = query.captures(tree.root_node)
 
-        processed_nodes = set()
-        for node, capture_name in captures:
-            if capture_name == 'method':
-                if node.id in processed_nodes:
-                    continue
-                processed_nodes.add(node.id)
+        method_name_map = {}
+        for node, tag in captures:
+            if tag == 'method':
+                method_name_map[node.id] = None
+            elif tag == 'name':
+                parent_method = node.parent
+                if parent_method.id in method_name_map:
+                    method_name_map[parent_method.id] = node
 
-                name_node = node.child_by_field_name('name')
-                if name_node:
-                    function_name = name_node.text.decode('utf8')
-                    start_line_number = node.start_point[0] + 1
-                    end_line_number = node.end_point[0] + 1
-                    
-                    if function_name not in self.functionNameToId:
-                        self.functionNameToId[function_name] = []
-                    
-                    current_function_id = len(self.functionRawDataDic)
-                    self.functionRawDataDic[current_function_id] = (
-                        function_name,
-                        start_line_number,
-                        end_line_number,
-                        node,
-                    )
-                    self.functionNameToId[function_name].append(current_function_id)
-                    self.functionToFile[current_function_id] = file_path
-        return
+        for method_id, name_node in method_name_map.items():
+            if name_node:
+                method_node = tree.root_node.descendant_for_byte_range(method_id, method_id)
+                function_name = name_node.text.decode('utf8')
+                start_line_number = method_node.start_point[0] + 1
+                end_line_number = method_node.end_point[0] + 1
+                
+                if function_name not in self.functionNameToId:
+                    self.functionNameToId[function_name] = []
+                
+                current_function_id = len(self.functionRawDataDic)
+                self.functionRawDataDic[current_function_id] = (
+                    function_name,
+                    start_line_number,
+                    end_line_number,
+                    method_node,
+                )
+                self.functionNameToId[function_name].append(current_function_id)
+                self.functionToFile[current_function_id] = file_path
 
-    def extract_global_info(
-        self, file_path: str, source_code: str, tree: tree_sitter.Tree
-    ) -> None:
-        """
-        Parse the global (macro) information in a Java source file.
-        Currently not implemented.
-        """
-        return
+    def extract_function_info_from_code(self, file_path: str, source_code: str) -> None:
+        tree = self.parser.parse(bytes(source_code, "utf8"))
+        self.extract_function_info(file_path, source_code, tree)
 
-    def get_callee_name_at_call_site(
-        self, node: tree_sitter.Node, source_code: str
-    ) -> str:
-        """
-        Get the callee (method) name at the call site.
-        Extract texts from children nodes.
-        """
-        child_texts = [
-            source_code[child.start_byte : child.end_byte] for child in node.children
-        ]
-        if "." in child_texts:
-            function_name = child_texts[child_texts.index(".") + 1]
-        else:
-            function_name = child_texts[0] if child_texts else ""
-        return function_name
+    def extract_global_info(self, file_path: str, source_code: str, tree: tree_sitter.Tree) -> None:
+        # Java does not have global variables or macros in the same way as C/Cpp,
+        # but you can have public static fields.
+        # This implementation can be extended to find them if needed.
+        pass
 
-    def get_callsites_by_callee_name(
-        self, current_function: Function, callee_name: str
-    ) -> List[tree_sitter.Node]:
-        """
-        Find call site nodes for the given callee name.
-        """
+    def get_callee_name_at_call_site(self, node: tree_sitter.Node, source_code: str) -> str:
+        if node.type == "method_invocation":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                return name_node.text.decode('utf8')
+            
+            # Handling for more complex calls like object.method()
+            obj_node = node.child_by_field_name("object")
+            if obj_node:
+                name_node = node.children[-1] # name is usually the last child
+                if name_node.type == 'identifier':
+                    return name_node.text.decode('utf8')
+        return ""
+
+    def get_callsites_by_callee_name(self, current_function: Function, callee_name: str) -> List[tree_sitter.Node]:
         results = []
-        file_content = self.code_in_files[current_function.file_path]
+        file_content = self.fileContentDic[current_function.file_path]
         call_site_nodes = find_nodes_by_type(
             current_function.parse_tree_root_node, "method_invocation"
         )
         for call_site in call_site_nodes:
-            if (
-                self.get_callee_name_at_call_site(call_site, file_content)
-                == callee_name
-            ):
+            if (self.get_callee_name_at_call_site(call_site, file_content) == callee_name):
                 results.append(call_site)
         return results
 
-    def get_arguments_at_callsite(
-        self, current_function: Function, call_site_node: tree_sitter.Node
-    ) -> Set[Value]:
-        """
-        Get arguments from a call site in a function.
-        :param current_function: the function to be analyzed
-        :param call_site_node: the node of the call site
-        :return: the arguments
-        """
-        arguments = set([])
+    def get_arguments_at_callsite(self, current_function: Function, call_site_node: tree_sitter.Node) -> Set[Value]:
+        arguments = set()
         file_name = current_function.file_path
-        source_code = self.code_in_files[file_name]
-        for sub_node in call_site_node.children:
-            if sub_node.type == "argument_list":
-                arg_list = sub_node.children[1:-1]
-                for element in arg_list:
-                    if element.type != ",":
-                        line_number = source_code[: element.start_byte].count("\n") + 1
-                        arguments.add(
-                            Value(
-                                source_code[element.start_byte : element.end_byte],
-                                line_number,
-                                ValueLabel.ARG,
-                                file_name,
-                                len(arguments),
-                            )
-                        )
-        return arguments
-
-    def get_parameters_in_single_function(
-        self, current_function: Function
-    ) -> Set[Value]:
-        """
-        Find the parameters of a function.
-        :param current_function: The function to be analyzed.
-        :return: A set of parameters as values
-        """
-        if current_function.paras is not None:
-            return current_function.paras
-        current_function.paras = set([])
-        file_content = self.code_in_files[current_function.file_path]
-        parameters = find_nodes_by_type(
-            current_function.parse_tree_root_node, "formal_parameter"
-        )
+        source_code = self.fileContentDic[file_name]
+        
+        argument_list_node = call_site_node.child_by_field_name("arguments")
+        if not argument_list_node:
+            return arguments
+            
         index = 0
-        for parameter_node in parameters:
-            for sub_node in find_nodes_by_type(parameter_node, "identifier"):
-                parameter_name = file_content[sub_node.start_byte : sub_node.end_byte]
-                line_number = file_content[: sub_node.start_byte].count("\n") + 1
-                current_function.paras.add(
+        for arg_node in argument_list_node.children:
+            if arg_node.type not in ['(', ')', ',']:
+                line_number = arg_node.start_point[0] + 1
+                arg_text = arg_node.text.decode('utf8')
+                arguments.add(
                     Value(
-                        parameter_name,
+                        arg_text,
                         line_number,
-                        ValueLabel.PARA,
-                        current_function.file_path,
-                        index,
+                        ValueLabel.ARG,
+                        file_name,
+                        index
                     )
                 )
                 index += 1
-        return current_function.paras
+        return arguments
 
-    def get_return_values_in_single_function(
-        self, current_function: Function
-    ) -> Set[Value]:
-        """
-        Find the return values of a function.
-        :param current_function: The function to be analyzed.
-        :return: A set of return values
-        """
-        if current_function.retvals is not None:
-            return current_function.retvals
+    def get_parameters_in_single_function(self, current_function: Function) -> Set[Value]:
+        parameters = set()
+        
+        param_list_node = find_nodes_by_type(current_function.parse_tree_root_node, "formal_parameters")
+        if not param_list_node:
+            return parameters
+            
+        param_list_node = param_list_node[0]
 
-        current_function.retvals = set([])
-        file_content = self.code_in_files[current_function.file_path]
-        retnodes = find_nodes_by_type(
-            current_function.parse_tree_root_node, "return_statement"
-        )
-        for retnode in retnodes:
-            line_number = file_content[: retnode.start_byte].count("\n") + 1
-            restmts_str = file_content[retnode.start_byte : retnode.end_byte]
-            returned_value = restmts_str.replace("return", "").strip()
-            current_function.retvals.add(
-                Value(
-                    returned_value,
-                    line_number,
-                    ValueLabel.RET,
-                    current_function.file_path,
-                    0,
+        index = 0
+        for param_node in param_list_node.children:
+            if param_node.type == "formal_parameter":
+                param_name_node = param_node.child_by_field_name("name")
+                if param_name_node:
+                    line_number = param_name_node.start_point[0] + 1
+                    param_name = param_name_node.text.decode('utf8')
+                    parameters.add(
+                        Value(
+                            param_name,
+                            line_number,
+                            ValueLabel.PARA,
+                            current_function.file_path,
+                            index,
+                        )
+                    )
+                    index +=1
+        return parameters
+
+    def get_return_values_in_single_function(self, current_function: Function) -> Set[Value]:
+        ret_values = set()
+        file_content = self.fileContentDic[current_function.file_path]
+        ret_nodes = find_nodes_by_type(current_function.parse_tree_root_node, "return_statement")
+        
+        for ret_node in ret_nodes:
+            line_number = ret_node.start_point[0] + 1
+            if len(ret_node.children) > 1:
+                value_node = ret_node.children[1] # 'return' is child 0
+                ret_text = value_node.text.decode('utf8')
+                ret_values.add(
+                    Value(
+                        ret_text,
+                        line_number,
+                        ValueLabel.RET,
+                        current_function.file_path,
+                        0 
+                    )
                 )
-            )
-        return current_function.retvals
+        return ret_values
 
-    def get_if_statements(
-        self, function: Function, source_code: str
-    ) -> Dict[Tuple, Tuple]:
-        """
-        Find if-statements in the Java method.
-        Returns a dictionary mapping a (start_line, end_line) tuple to the if-statement info.
-        """
-        if_statement_nodes = find_nodes_by_type(
-            function.parse_tree_root_node, "if_statement"
-        )
+    def get_if_statements(self, function: Function, source_code: str) -> Dict[Tuple, Tuple]:
         if_statements = {}
-        for if_node in if_statement_nodes:
-            condition_str = ""
-            condition_start_line = 0
-            condition_end_line = 0
-            true_branch_start_line = 0
-            true_branch_end_line = 0
+        if_nodes = find_nodes_by_type(function.parse_tree_root_node, "if_statement")
+        
+        for if_node in if_nodes:
+            start_line = if_node.start_point[0] + 1
+            end_line = if_node.end_point[0] + 1
+            
+            condition_node = if_node.child_by_field_name("condition")
+            consequence_node = if_node.child_by_field_name("consequence")
+            alternative_node = if_node.child_by_field_name("alternative")
+
+            condition_str = condition_node.text.decode('utf8')
+            condition_start_line = condition_node.start_point[0] + 1
+            condition_end_line = condition_node.end_point[0] + 1
+            
+            true_branch_start_line = consequence_node.start_point[0] + 1
+            true_branch_end_line = consequence_node.end_point[0] + 1
+
             else_branch_start_line = 0
             else_branch_end_line = 0
+            if alternative_node:
+                # remove 'else' keyword
+                else_block = alternative_node.children[1] if alternative_node.children[0].type == 'else' else alternative_node.children[0]
+                else_branch_start_line = else_block.start_point[0] + 1
+                else_branch_end_line = else_block.end_point[0] + 1
 
-            block_num = 0
-            for sub_target in if_node.children:
-                if sub_target.type == "parenthesized_expression":
-                    condition_start_line = (
-                        source_code[: sub_target.start_byte].count("\n") + 1
-                    )
-                    condition_end_line = (
-                        source_code[: sub_target.end_byte].count("\n") + 1
-                    )
-                    condition_str = source_code[
-                        sub_target.start_byte : sub_target.end_byte
-                    ]
-                if sub_target.type == "block":
-                    lower_lines = []
-                    upper_lines = []
-                    for sub_sub in sub_target.children:
-                        if sub_sub.type not in {"{", "}"}:
-                            lower_lines.append(
-                                source_code[: sub_sub.start_byte].count("\n") + 1
-                            )
-                            upper_lines.append(
-                                source_code[: sub_sub.end_byte].count("\n") + 1
-                            )
-                    if lower_lines and upper_lines:
-                        if block_num == 0:
-                            true_branch_start_line = min(lower_lines)
-                            true_branch_end_line = max(upper_lines)
-                            block_num += 1
-                        elif block_num == 1:
-                            else_branch_start_line = min(lower_lines)
-                            else_branch_end_line = max(upper_lines)
-                            block_num += 1
-                if sub_target.type == "expression_statement":
-                    true_branch_start_line = (
-                        source_code[: sub_target.start_byte].count("\n") + 1
-                    )
-                    true_branch_end_line = (
-                        source_code[: sub_target.end_byte].count("\n") + 1
-                    )
-
-            if_statement_start_line = source_code[: if_node.start_byte].count("\n") + 1
-            if_statement_end_line = source_code[: if_node.end_byte].count("\n") + 1
-            line_scope = (if_statement_start_line, if_statement_end_line)
-            info = (
-                condition_start_line,
-                condition_end_line,
-                condition_str,
-                (true_branch_start_line, true_branch_end_line),
-                (else_branch_start_line, else_branch_end_line),
+            if_statements[(start_line, end_line)] = (
+                 condition_str,
+                 condition_start_line,
+                 condition_end_line,
+                 (true_branch_start_line, true_branch_end_line),
+                 (else_branch_start_line, else_branch_end_line),
             )
-            if_statements[line_scope] = info
         return if_statements
 
-    def get_loop_statements(
-        self, function: Function, source_code: str
-    ) -> Dict[Tuple, Tuple]:
-        """
-        Find loop statements in the Java method.
-        Returns a dictionary mapping (start_line, end_line) to loop statement information.
-        """
+    def get_loop_statements(self, function: Function, source_code: str) -> Dict[Tuple, Tuple]:
         loop_statements = {}
-        root_node = function.parse_tree_root_node
-        for_statement_nodes = find_nodes_by_type(root_node, "for_statement")
-        for_statement_nodes.extend(
-            find_nodes_by_type(root_node, "enhanced_for_statement")
-        )
-        while_statement_nodes = find_nodes_by_type(root_node, "while_statement")
+        loop_types = ["for_statement", "while_statement", "do_statement", "enhanced_for_statement"]
+        
+        for loop_type in loop_types:
+            loop_nodes = find_nodes_by_type(function.parse_tree_root_node, loop_type)
+            for loop_node in loop_nodes:
+                start_line = loop_node.start_point[0] + 1
+                end_line = loop_node.end_point[0] + 1
+                body_node = loop_node.child_by_field_name("body")
+                body_start_line = body_node.start_point[0] + 1
+                body_end_line = body_node.end_point[0] + 1
 
-        for loop_node in for_statement_nodes:
-            loop_start_line = source_code[: loop_node.start_byte].count("\n") + 1
-            loop_end_line = source_code[: loop_node.end_byte].count("\n") + 1
-
-            header_line_start = 0
-            header_line_end = 0
-            header_str = ""
-            loop_body_start_line = 0
-            loop_body_end_line = 0
-
-            header_start_byte = 0
-            header_end_byte = 0
-
-            for child in loop_node.children:
-                if child.type == "(":
-                    header_line_start = source_code[: child.start_byte].count("\n") + 1
-                    header_start_byte = child.end_byte
-                if child.type == ")":
-                    header_line_end = source_code[: child.end_byte].count("\n") + 1
-                    header_end_byte = child.start_byte
-                    header_str = source_code[header_start_byte:header_end_byte]
-                if child.type == "block":
-                    lower_lines = []
-                    upper_lines = []
-                    for sub in child.children:
-                        if sub.type not in {"{", "}"}:
-                            lower_lines.append(
-                                source_code[: sub.start_byte].count("\n") + 1
-                            )
-                            upper_lines.append(
-                                source_code[: sub.end_byte].count("\n") + 1
-                            )
-                    if lower_lines and upper_lines:
-                        loop_body_start_line = min(lower_lines)
-                        loop_body_end_line = max(upper_lines)
-                if child.type == "expression_statement":
-                    loop_body_start_line = (
-                        source_code[: child.start_byte].count("\n") + 1
-                    )
-                    loop_body_end_line = source_code[: child.end_byte].count("\n") + 1
-            loop_statements[(loop_start_line, loop_end_line)] = (
-                header_line_start,
-                header_line_end,
-                header_str,
-                loop_body_start_line,
-                loop_body_end_line,
-            )
-
-        for loop_node in while_statement_nodes:
-            loop_start_line = source_code[: loop_node.start_byte].count("\n") + 1
-            loop_end_line = source_code[: loop_node.end_byte].count("\n") + 1
-
-            header_line_start = 0
-            header_line_end = 0
-            header_str = ""
-            loop_body_start_line = 0
-            loop_body_end_line = 0
-
-            for child in loop_node.children:
-                if child.type == "parenthesized_expression":
-                    header_line_start = source_code[: child.start_byte].count("\n") + 1
-                    header_line_end = source_code[: child.end_byte].count("\n") + 1
-                    header_str = source_code[child.start_byte : child.end_byte]
-                if child.type == "block":
-                    lower_lines = []
-                    upper_lines = []
-                    for sub in child.children:
-                        if sub.type not in {"{", "}"}:
-                            lower_lines.append(
-                                source_code[: sub.start_byte].count("\n") + 1
-                            )
-                            upper_lines.append(
-                                source_code[: sub.end_byte].count("\n") + 1
-                            )
-                    if lower_lines and upper_lines:
-                        loop_body_start_line = min(lower_lines)
-                        loop_body_end_line = max(upper_lines)
-            loop_statements[(loop_start_line, loop_end_line)] = (
-                header_line_start,
-                header_line_end,
-                header_str,
-                loop_body_start_line,
-                loop_body_end_line,
-            )
+                loop_statements[(start_line, end_line)] = (
+                    loop_node.type,
+                    loop_node.text.decode('utf8'),
+                    body_node.text.decode('utf8'),
+                    body_start_line,
+                    body_end_line
+                )
         return loop_statements
-
-    def get_local_variable_declarations(self, function: Function) -> List[str]:
-        """
-        Extracts all local variable declaration statements within a given function.
-        e.g., 'Class<?> componentClass = null;'
-        """
-        declarations = []
-        try:
-            start_line = function.start_line
-            end_line = function.end_line
-            
-            # Tree-sitter query to find local variable declarations
-            query_str = """
-            (local_variable_declaration) @declaration
-            """
-            query = self.language.query(query_str)
-            captures = query.captures(self.root_node, start_byte=function.start_byte, end_byte=function.end_byte)
-            
-            for node, _ in captures:
-                declarations.append(node.text.decode('utf8'))
-        except Exception as e:
-            # Handle potential errors, e.g., in parsing
-            print(f"Error extracting local variables for function {function.name}: {e}")
-            
-        return declarations
-
-    def get_assignment_expressions(self, function: Function) -> List[str]:
-        """
-        Extracts all assignment expression statements within a given function.
-        e.g., 'componentType = ((Class) type).getComponentType();'
-        """
-        assignments = []
-        try:
-            # Tree-sitter query to find assignment expressions
-            query_str = """
-            (assignment_expression) @assignment
-            """
-            query = self.language.query(query_str)
-            captures = query.captures(self.root_node, start_byte=function.start_byte, end_byte=function.end_byte)
-
-            for node, _ in captures:
-                # We often get the expression itself, we want the whole statement for context
-                current_node = node
-                while current_node.parent and current_node.type != 'expression_statement':
-                    current_node = current_node.parent
-                assignments.append(current_node.text.decode('utf8'))
-
-        except Exception as e:
-            print(f"Error extracting assignments for function {function.name}: {e}")
-
-        return list(set(assignments)) # Return unique assignments
-
-    def find_function_by_name(self, function_name: str) -> Optional[Function]:
-        """
-        Finds a function by its name and returns its details as a dictionary.
-        This is a simplified example; in a real scenario, you might need to handle overloads.
-        """
-        if function_name in self.functionNameToId:
-            # Assuming the first match is the desired one for simplicity
-            func_id = self.functionNameToId[function_name][0]
-            if func_id in self.function_env:
-                return self.function_env[func_id]
-        return None
-
-    def get_function_source_code(self, function_name: str) -> str:
-        """
-        Retrieve the source code of a function by its name.
-        """
-        function_info = self.find_function_by_name(function_name)
-        if function_info:
-            return function_info.function_code
-        return ""
-    
-    def get_all_imports(self) -> list:
-        """
-        Get all imports from the source code.
-        """
-        # Implementation of get_all_imports method
-        pass

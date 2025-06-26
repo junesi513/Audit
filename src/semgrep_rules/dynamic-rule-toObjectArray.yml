@@ -1,0 +1,7 @@
+sanitizer: null
+sink:
+  node_name: cast
+  node_type: MethodCallExpr
+source:
+  node_name: get
+  node_type: MethodCallExpr

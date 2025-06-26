@@ -1,47 +1,42 @@
 {
-    "model_role_name": "Security Pattern Analyst",
+    "model_role_name": "Security AST Node Analyst",
     "user_role_name": "Developer",
-    "system_role": "You are a world-class security expert specializing in identifying vulnerability patterns for taint analysis. Your task is to analyze Java code and a vulnerability hypothesis to pinpoint taint flow patterns. Your entire response MUST be only a valid JSON object, enclosed in a ```json ... ``` block, containing three keys: `source`, `sink`, and `sanitizer`. Each key should have a list of strings as its value, where each string is a code pattern to be used directly in a Semgrep rule. If a pattern does not exist for a key, provide an empty list.",
-    "task": "Based on the vulnerability hypothesis and the function code, identify the code patterns for taint sources, sinks, and sanitizers. A 'source' is where tainted, untrusted data originates. A 'sink' is where that data is used in a dangerous way. A 'sanitizer' is a function or check that neutralizes the threat. Provide these patterns as strings.",
+    "system_role": "You are a world-class security expert specializing in identifying vulnerability patterns for taint analysis by analyzing Abstract Syntax Trees (AST). Your task is to analyze Java code and a vulnerability hypothesis to pinpoint taint flow patterns. Your entire response MUST be only a valid JSON object, enclosed in a ```json ... ``` block, containing three keys: `source`, `sink`, and `sanitizer`. Each key's value should be a list of objects. **CRITICAL**: Each object in the list MUST contain the keys `node_type` and `node_name`. The value for `node_type` must be a valid Tree-sitter node type string (e.g., 'method_invocation', 'formal_parameter'). The value for `node_name` must be the string name of the identifier (e.g., 'parseArray', 'type'). If a key has no relevant nodes, provide an empty list.",
+    "task": "Based on the vulnerability hypothesis and the function code, identify the AST nodes corresponding to taint sources, sinks, and sanitizers. A 'source' is where tainted, untrusted data originates. A 'sink' is where that data is used in a dangerous way. A 'sanitizer' is a function or check that neutralizes the threat. For each identified node, provide its type and name.",
     "analysis_rules": [
         "Focus on the data flow from source to sink.",
-        "The patterns should be specific enough to be useful but general enough to use metavariables (e.g., `$X`, `$VAR`).",
-        "**CRITICAL**: Each pattern MUST be a valid Java code snippet or a valid Semgrep pattern (e.g., using '...'). DO NOT provide a list of single characters.",
-        "If there are no sanitizers, the `sanitizer` list should be an empty list."
+        "Provide the most specific and relevant node. For example, for a dangerous function call, the `node_type` should be 'method_invocation'.",
+        "**CRITICAL**: You MUST provide both `node_type` and `node_name` for each identified pattern. Do not use other keys like 'type', 'name', or 'value'."
     ],
     "analysis_examples": [
         {
-            "example_question": "### Vulnerability Hypothesis\nThe function `getFastMatchToken` is vulnerable because its return value is used without validation to determine a JSON structure type, which can be manipulated by an attacker.\n\n### Code to Analyze\n```java\npublic static int getFastMatchToken(String key) {\n    // ... complex logic ...\n    returnಮಾನ\n```\n<PREVIOUS_ERROR_BLOCK>\n### Instruction\nAnalyze the data flow and identify the source, sink, and sanitizer patterns. Respond ONLY with the JSON object.",
+            "example_question": "### Vulnerability Hypothesis\nThe function is susceptible to a type confusion vulnerability (CWE-20). It resolves a user-controllable generic `Type` to a `Class` and uses it for deserialization without sufficient validation. An attacker could provide a crafted generic type to manipulate the resolved class, causing the deserialization of unintended object types.\n\n### Code to Analyze\n```java\n@SuppressWarnings({ \"unchecked\", \"rawtypes\" })\npublic <T> T deserialze(DefaultJSONParser parser, Type type, Object fieldName) {\n    // ...\n    parser.parseArray(componentClass, array, fieldName);\n    // ...\n}\n```\n<PREVIOUS_ERROR_BLOCK>\n### Instruction\nAnalyze the data flow and identify the AST nodes for source, sink, and sanitizer. Respond ONLY with the JSON object.",
             "example_answer": {
                 "source": [
-                    "public static int getFastMatchToken(String key) { ... }"
+                    {
+                        "node_type": "formal_parameter",
+                        "node_name": "type"
+                    }
                 ],
-                "sink": [],
+                "sink": [
+                    {
+                        "node_type": "method_invocation",
+                        "node_name": "parseArray"
+                    }
+                ],
                 "sanitizer": []
             }
         },
         {
-            "example_question": "### Instruction\nHere is a bad example. The following output is INCORRECT because the patterns are just lists of characters, not valid code.\n\n```json\n{\n  \"source\": [\"g\", \"e\", \"t\", \"F\", \"a\", \"s\", \"t\"],\n  \"sink\": [\"c\", \"a\", \"l\", \"l\", \"e\", \"r\"],\n  \"sanitizer\": []\n}\n```\n\nYour task is to provide valid code patterns, not single characters.",
+            "example_question": "### Instruction\nHere is a BAD example. The following output is INCORRECT because it uses the key 'type' instead of 'node_type' and 'methodName' instead of 'node_name'.\n\n```json\n{\n  \"source\": [],\n  \"sink\": [{\"type\": \"MethodCallExpr\", \"methodName\": \"parseArray\"}],\n  \"sanitizer\": []\n}\n```\n\nYour task is to ALWAYS use `node_type` and `node_name` as the keys.",
             "example_answer": {
                 "source": [],
                 "sink": [],
                 "sanitizer": []
             }
-        },
-        {
-            "example_question": "### Vulnerability Hypothesis\nThe function is susceptible to a type confusion vulnerability (CWE-20). It resolves a user-controllable generic `Type` to a `Class` and uses it for deserialization without sufficient validation. An attacker could provide a crafted generic type to manipulate the resolved class, causing the deserialization of unintended object types.\n\n### Code to Analyze\n```java\n@SuppressWarnings({ \"unchecked\", \"rawtypes\" })\npublic <T> T deserialze(DefaultJSONParser parser, Type type, Object fieldName) {\n    // ...\n    componentClass = TypeUtils.getClass(componentType);\n    // ...\n    parser.parseArray(componentClass, array, fieldName);\n    // ...\n}\n```\n<PREVIOUS_ERROR_BLOCK>\n### Instruction\nAnalyze the data flow and identify the source, sink, and sanitizer patterns. Respond ONLY with the JSON object.",
-            "example_answer": {
-                "source": [
-                    "public <T> T deserialze(..., Type type, ...)"
-                ],
-                "sink": [
-                    "$PARSER.parseArray($CLASS, ...)"
-                ],
-                "sanitizer": []
-            }
         }
     ],
-    "question_template": "### Vulnerability Hypothesis\n<VULN_HYPOTHESIS>\n\n### Code to Analyze\n```java\n<FUNC_CODE>\n```\n<PREVIOUS_ERROR_BLOCK>\n### Instruction\nAnalyze the data flow and identify the source, sink, and sanitizer patterns. Respond ONLY with a JSON object with keys `source`, `sink`, and `sanitizer`.",
+    "question_template": "Analyze the following Java function to identify potential data flow paths for a CWE-20 (Improper Input Validation) vulnerability, based on the given hypothesis. Your task is to act as a security expert and specify the source and sink for a potential taint analysis. The function code is provided below:\n\n<FUNC_CODE>\n\nVulnerability Hypothesis: <VUL_HYPOTHESIS>\n\nTo specify the source and sink, you must identify the precise AST (Abstract Syntax Tree) nodes involved. For Java, common node types from the tree-sitter grammar include:\n- method_invocation\n- object_creation_expression\n- formal_parameter\n- local_variable_declaration\n- assignment_expression\n- identifier\n- field_access\n\nYour output MUST be a single JSON object with 'source' and 'sink' keys. Each key should have a list of objects, where each object contains 'node_type' and 'node_name'. The 'node_name' MUST be the exact identifier text as it appears in the code.\n\nExample Output:\n```json\n{\n  \"source\": [\n    {\n      \"node_type\": \"formal_parameter\",\n      \"node_name\": \"untrustedData\"\n    }\n  ],\n  \"sink\": [\n    {\n      \"node_type\": \"method_invocation\",\n      \"node_name\": \"processData\"\n    }\n  ]\n}\n```\n\n<PREVIOUS_ERROR_SECTION>\nProvide the JSON object for the function above.",
     "answer_format_cot": [],
     "meta_prompts": [
         {

@@ -28,6 +28,7 @@ class LLMToolOutput:
     is_valid: bool
     output: Any = None
     error_message: str = None
+    raw_output: str = None
 
 class LLM:
     """

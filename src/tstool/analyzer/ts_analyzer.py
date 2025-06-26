@@ -6,9 +6,10 @@ import concurrent.futures
 from typing import List, Tuple, Dict, Set, Optional
 from abc import ABC, abstractmethod
 import threading
+from enum import Enum
 
 import tree_sitter
-from tree_sitter import Language
+from tree_sitter import Language, Parser
 from tqdm import tqdm
 import networkx as nx
 
@@ -160,7 +161,7 @@ class TSAnalyzer(ABC):
         else:
             raise ValueError("Invalid language setting")
         self.parser.set_language(self.language)
-
+        
         # Add a dictionary to store parsed trees
         self.parse_trees: Dict[str, tree_sitter.Tree] = {}
 
@@ -209,7 +210,7 @@ class TSAnalyzer(ABC):
 
     def _analyze_single_function(
         self, function_id: int, raw_data: Tuple
-    ) -> Optional[Tuple[int, "Function"]]:
+    ) -> Tuple[int, "Function"]:
         """
         Helper function to analyze a single function.
         """
@@ -227,12 +228,11 @@ class TSAnalyzer(ABC):
             file_name,
         )
         current_function = self.extract_meta_data_in_single_function(current_function)
-        if current_function:
-            return function_id, current_function
-        return None
+        return function_id, current_function
 
     def parse_project(self) -> None:
         """
+
         Parse all project files using tree-sitter.
         """
         with concurrent.futures.ThreadPoolExecutor(
@@ -265,12 +265,8 @@ class TSAnalyzer(ABC):
                 futures[future] = function_id
 
             for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                
-                if result:
-                    function_id, current_function = result
-                    if current_function:
-                        self.function_env[function_id] = current_function
+                func_id, current_function = future.result()
+                self.function_env[func_id] = current_function
                 pbar.update(1)
             pbar.close()
         return
@@ -294,10 +290,7 @@ class TSAnalyzer(ABC):
                 )
                 futures[future] = function_id
             for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                if result:
-                    function_id, current_function = result
-                    self.function_env[function_id] = current_function
+                # Optionally, process or log each completed task here.
                 pbar.update(1)
             pbar.close()
         return
@@ -410,9 +403,8 @@ class TSAnalyzer(ABC):
                 tmp_api = API(-1, callee_name, len(arguments))
 
                 # Insert the API into the API environment if it does not exist previously
-                for single_api_id in list(self.api_env):
-                    api = self.api_env[single_api_id]
-                    if api == tmp_api:
+                for single_api_id in self.api_env:
+                    if self.api_env[single_api_id] == tmp_api:
                         api_id = single_api_id
                 if api_id == None:
                     self.api_env[len(self.api_env)] = API(
@@ -802,6 +794,12 @@ class TSAnalyzer(ABC):
             return ""
         return file_lines[line_number - 1]
 
+    def get_all_functions(self) -> List[Function]:
+        """
+        Get all functions from the function environment.
+        """
+        return list(self.function_env.values())
+
 
 # Utility functions for AST node type maching
 
@@ -832,3 +830,4 @@ def find_nodes_by_type(
     for child_node in root_node.children:
         nodes.extend(find_nodes_by_type(child_node, node_type, k + 1))
     return nodes
+ 

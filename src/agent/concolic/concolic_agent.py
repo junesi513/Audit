@@ -1,197 +1,305 @@
-import json
-import subprocess
+import yaml
 from pathlib import Path
-import pprint
+import re
 
 from src.agent.agent import Agent
 from src.llmtool.concolic.hypothesis_generator import HypothesisGenerator
 from src.llmtool.concolic.semgrep_generator import SemgrepGenerator
-from src.memory.report.bug_report import BugReport
-from src.tstool.analyzer import JavaTSAnalyzer
+from src.memory.semantic.dfbscan_state import DFBScanState
+from src.tstool.analyzer.Java_TS_analyzer import JavaTSAnalyzer
 from src.ui.logger import Logger
+from src.memory.report.bug_report import BugReport
 
 class ConcolicAgent(Agent):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.project_path = kwargs.get('project_path')
-        self.target_function = kwargs.get('target_function')
-        self.language = kwargs.get('language')
-        self.model_name = kwargs.get('model_name', "gemini-1.5-pro-latest")
-        self.api_key = kwargs.get('api_key')
-        self.tag = kwargs.get('tag')
-        self.cwe_id = "CWE-502"  # Hardcoded for now for this specific vulnerability
-        
-        agent_name = self.__class__.__name__
-        log_dir = kwargs.get('log_dir', 'log')
-        self.result_dir = Path(log_dir) / f"{agent_name}-{self.tag}"
-        self.result_dir.mkdir(parents=True, exist_ok=True)
-        log_file = self.result_dir / "agent.log"
-        self.logger = Logger(agent_name, str(log_file))
-        
+    def __init__(self, props):
+        super().__init__()
+        self.logger = props.get("logger")
         self.hypothesis_generator = HypothesisGenerator(
-            model_name=self.model_name,
-            language=self.language,
-            api_key=self.api_key
+            language=props.get('language'),
+            model_name=props.get('model_name'),
+            api_key=props.get('api_key')
         )
         self.semgrep_generator = SemgrepGenerator(
-            language=self.language,
-            model_name=self.model_name,
-            api_key=self.api_key
+            language=props.get('language'),
+            model_name=props.get('model_name'),
+            api_key=props.get('api_key')
         )
+        self.bug_type = props.get("bug_type", "CWE20")
+        self.ts_analyzer = JavaTSAnalyzer(code_in_files={})
+
+    def _find_ast_nodes(self, root_node, node_info_list):
+        """Finds AST nodes based on the type and name information from LLM."""
+        found_nodes = []
+        for info in node_info_list:
+            if not isinstance(info, dict):
+                continue
+
+            node_type = info.get("node_type")
+            node_name = info.get("node_name")
+            if not node_type or not node_name:
+                continue
+            
+            # More precise recursive search
+            q = [root_node]
+            while q:
+                curr = q.pop(0)
+                # Primary check: node type matches
+                if curr.type == node_type:
+                    # Secondary check: node's own identifier or name matches.
+                    # This is more robust than checking `in curr.text`.
+                    
+                    # Check for a 'name' field, common in declarations
+                    name_node = curr.child_by_field_name('name')
+                    if name_node and name_node.text.decode('utf8') == node_name:
+                        found_nodes.append(curr)
+                        continue # Found, so no need to check other conditions or children
+
+                    # Check for an 'identifier' child, common in other expressions
+                    for child in curr.children:
+                        # Sometimes the identifier is nested, e.g., in `scoped_identifier`
+                        if child.type == 'identifier' and child.text.decode('utf8') == node_name:
+                            found_nodes.append(curr)
+                            break # Found for this `curr`
+                        # Handle cases like "qualifier.identifier"
+                        if 'identifier' in child.type: 
+                             id_nodes = self._find_nodes_by_types(child, ['identifier'])
+                             if any(id_node.text.decode('utf8') == node_name for id_node in id_nodes):
+                                 found_nodes.append(curr)
+                                 break # Found for this `curr`
+
+                # If not found at this level, continue searching children
+                q.extend(curr.children)
+        # Remove duplicates
+        return list(dict.fromkeys(found_nodes))
+
+    def _find_nodes_by_types(self, node, types):
+        if not isinstance(types, list):
+            types = [types]
+        q = [node]
+        nodes = []
+        while q:
+            curr = q.pop(0)
+            if curr.type in types:
+                nodes.append(curr)
+            q.extend(curr.children)
+        return nodes
+
+    def _get_all_identifiers(self, node):
+        """Recursively find all identifier nodes under a given node."""
+        if not node:
+            return []
+        return self._find_nodes_by_types(node, ['identifier'])
+
+    def _simple_taint_analysis(self, source_nodes, sink_nodes, root_node) -> bool:
+        if not source_nodes or not sink_nodes:
+            return False
+
+        # 1. Initialize tainted variables from source nodes
+        tainted_vars = set()
+        for node in source_nodes:
+            # Heuristic: find all identifiers in the source node and consider them tainted
+            name_nodes = self._get_all_identifiers(node)
+            for name_node in name_nodes:
+                tainted_vars.add(name_node.text.decode('utf8'))
+
+        if not tainted_vars:
+            self.logger.print_console("No initial tainted variables found from sources.", "debug")
+            return False
         
-    def _get_analyzer(self):
+        self.logger.print_console(f"Initial tainted variables: {tainted_vars}", "debug")
+
+        # 2. Taint Propagation using a worklist
+        worklist = list(tainted_vars)
+        
+        method_body = root_node.child_by_field_name('body')
+        if not method_body:
+            return False
+            
+        processed_nodes = set() # To avoid infinite loops
+
+        while worklist:
+            var_to_check = worklist.pop(0)
+            
+            # Find all assignments and declarations in the method body
+            nodes_to_check = self._find_nodes_by_types(method_body, ['assignment_expression', 'variable_declarator'])
+            
+            for node in nodes_to_check:
+                if node in processed_nodes:
+                    continue
+
+                if node.type == 'assignment_expression':
+                    left_node = node.child_by_field_name('left')
+                    right_node = node.child_by_field_name('right')
+                elif node.type == 'variable_declarator':
+                    left_node = node.child_by_field_name('name')
+                    right_node = node.child_by_field_name('value')
+                else:
+                    continue
+
+                if not left_node or not right_node:
+                    continue
+                
+                right_identifiers = {id_node.text.decode('utf8') for id_node in self._get_all_identifiers(right_node)}
+                
+                # Also check for method invocations where a tainted var is an argument
+                is_tainted_by_call = False
+                if right_node.type == 'method_invocation':
+                    argument_list = right_node.child_by_field_name('arguments')
+                    if argument_list:
+                        arg_identifiers = {id_node.text.decode('utf8') for id_node in self._get_all_identifiers(argument_list)}
+                        if not arg_identifiers.isdisjoint({var_to_check}):
+                            is_tainted_by_call = True
+
+                if var_to_check in right_identifiers or is_tainted_by_call:
+                    # new variable is tainted
+                    # assuming left is a simple identifier for assignment, which might not be true (e.g., a.b)
+                    new_tainted_var_name = left_node.text.decode('utf8').strip()
+                    if new_tainted_var_name and new_tainted_var_name not in tainted_vars:
+                        self.logger.print_console(f"Taint propagated: {var_to_check} -> {new_tainted_var_name}", "debug")
+                        tainted_vars.add(new_tainted_var_name)
+                        worklist.append(new_tainted_var_name)
+                    processed_nodes.add(node)
+
+        self.logger.print_console(f"Final tainted set: {tainted_vars}", "debug")
+
+        # 3. Check if any sink node uses a tainted variable
+        for node in sink_nodes:
+            sink_identifiers = {id_node.text.decode('utf8') for id_node in self._get_all_identifiers(node)}
+            # Check for intersection
+            if not tainted_vars.isdisjoint(sink_identifiers):
+                tainted_in_sink = tainted_vars.intersection(sink_identifiers)
+                self.logger.print_console(f"Taint flow VALIDATED: Tainted vars {tainted_in_sink} used in sink '{node.text.decode('utf8')}'", "info")
+                return True
+
+        return False
+
+
+    def run_agent(self, state: DFBScanState):
+        target_file_path = state.target_path
+        self.logger.print_console(f"Concolic agent (AST mode) is running on file: {target_file_path}", "info")
+        
         try:
-            ext = self._get_file_extension()
-            if not ext: return None
-            
-            files_with_ext = list(Path(self.project_path).rglob(f'*.{ext}'))
-            if not files_with_ext:
-                self.logger.print_console(f"No files with extension *.{ext} found.", "error")
-                return None
-            
-            self.logger.print_console(f"Found {len(files_with_ext)} files.")
-            code_in_files = {str(f): f.read_text() for f in files_with_ext}
-
-            if self.language.lower() == 'java':
-                return JavaTSAnalyzer(code_in_files=code_in_files, language_name=self.language.capitalize())
-            
-            # Other languages are not supported in this simplified agent
-            self.logger.print_console(f"Language '{self.language}' is not supported in this context.", "error")
-            return None
+            with open(target_file_path, 'r', encoding='utf-8') as f:
+                source_code = f.read()
         except Exception as e:
-            self.logger.print_console(f"Error creating analyzer: {e}", "error")
-            return None
+            self.logger.print_console(f"Failed to read file {target_file_path}: {e}", "error")
+            return
 
-    def _get_file_extension(self) -> str:
-        # Simplified to only support Java for this agent's purpose
-        if self.language.lower() == 'java':
-            return 'java'
-        self.logger.print_console(f"Language '{self.language}' is not supported.", "error")
-        return None
+        self.ts_analyzer.extract_function_info_from_code(file_path=target_file_path, source_code=source_code)
+        
+        if not self.ts_analyzer.functionRawDataDic:
+            self.logger.print_console(f"No methods found in {target_file_path}. Skipping.", "info")
+            return
+        
+        self.logger.print_console(f"Found {len(self.ts_analyzer.functionRawDataDic)} methods to analyze.", "info")
 
-    def _run_semgrep_validation(self, semgrep_rule: str, file_path: str) -> dict | None:
-        rule_path = self.result_dir / "semgrep_rule.yml"
-        with open(rule_path, "w") as f:
-            f.write(semgrep_rule)
+        for func_id, (func_name, start_line, end_line, ast_node) in self.ts_analyzer.functionRawDataDic.items():
+            self.logger.print_console(f"Analyzing method: {func_name}", "info")
+
+            function_code = ast_node.text.decode('utf8', 'ignore')
             
-        try:
-            completed_process = subprocess.run(
-                ["semgrep", "-c", str(rule_path), file_path, "--json"],
-                capture_output=True,
-                text=True,
-                check=False # Do not raise exception for non-zero exit codes (e.g., when findings are present)
-            )
+            # 1. Generate hypothesis
+            hypo_output = self.hypothesis_generator.generate(function_code)
+            if not hypo_output.is_valid or not hypo_output.output:
+                self.logger.print_console(f"Hypothesis generation failed for '{func_name}'. Skipping.", "warn")
+                if hypo_output.error_message:
+                    self.logger.print_console(f"Error: {hypo_output.error_message}", "debug")
+                if hypo_output.raw_output:
+                    self.logger.print_console(f"LLM Raw Output:\n---\n{hypo_output.raw_output}\n---", "debug")
+                continue
             
-            if completed_process.returncode not in [0, 1]: # 0 for no findings, 1 for findings
-                self.logger.print_console(f"Semgrep failed with return code {completed_process.returncode}:\n{completed_process.stderr}", "error")
-                return None
+            vul_hypo_dict = hypo_output.output
+            vul_hypo_str = vul_hypo_dict.get('vulnerability_hypothesis', '')
+            if not isinstance(vul_hypo_str, str) or not vul_hypo_str:
+                self.logger.print_console(f"Invalid hypothesis for '{func_name}'. Skipping.", "warn")
+                continue
+
+            # 2. Get taint flow patterns from LLM with self-correction
+            MAX_ATTEMPTS = 3
+            last_error = None
+            taint_patterns = None
             
-            output_json = json.loads(completed_process.stdout)
-            # Return the findings if any exist
-            return output_json if output_json.get("results") else None
+            for attempt in range(MAX_ATTEMPTS):
+                self.logger.print_console(f"Attempt {attempt + 1}/{MAX_ATTEMPTS} to get taint patterns for '{func_name}'.", "debug")
+                
+                taint_flow_output = self.semgrep_generator.generate(
+                    function_code=function_code,
+                    vulnerability_hypothesis=vul_hypo_str,
+                    previous_error=last_error
+                )
+
+                if not taint_flow_output.is_valid or not taint_flow_output.output:
+                    self.logger.print_console(f"Taint pattern generation failed on attempt {attempt + 1}.", "warn")
+                    last_error = taint_flow_output.error_message or "Generation failed without a specific error message."
+                    continue
+
+                taint_patterns = taint_flow_output.output
+                source_info = taint_patterns.get("source", [])
+                sink_info = taint_patterns.get("sink", [])
+
+                if not source_info or not sink_info:
+                    last_error = "LLM did not provide both source and sink information."
+                    self.logger.print_console(last_error, "debug")
+                    taint_patterns = None # Reset for next attempt
+                    continue
+
+                # Validate if nodes can be found
+                source_nodes = self._find_ast_nodes(ast_node, source_info)
+                sink_nodes = self._find_ast_nodes(ast_node, sink_info)
+
+                if source_nodes and sink_nodes:
+                    self.logger.print_console(f"Successfully found source/sink nodes for '{func_name}'.", "info")
+                    break # Success
+                else:
+                    last_error = f"Could not find AST nodes. Found {len(source_nodes)} sources and {len(sink_nodes)} sinks. Please provide different node information."
+                    self.logger.print_console(last_error, "debug")
+                    taint_patterns = None # Reset for next attempt
             
-        except FileNotFoundError:
-            self.logger.print_console("`semgrep` command not found. Please ensure it is installed.", "error")
-            return None
-        except json.JSONDecodeError:
-            self.logger.print_console(f"Failed to parse Semgrep JSON output.", "error")
-            return None
-        except Exception as e:
-            self.logger.print_console(f"An unexpected error occurred during Semgrep validation: {e}", "error")
-            return None
+            if not taint_patterns:
+                self.logger.print_console(f"Failed to get valid taint patterns for '{func_name}' after {MAX_ATTEMPTS} attempts. Skipping.", "error")
+                continue
+            
+            # From here, we assume source_info, sink_info, source_nodes, sink_nodes are valid
+            source_info = taint_patterns.get("source", [])
+            sink_info = taint_patterns.get("sink", [])
+            source_nodes = self._find_ast_nodes(ast_node, source_info)
+            sink_nodes = self._find_ast_nodes(ast_node, sink_info)
+
+            # 3. Find AST nodes and perform analysis
+            # source_nodes = self._find_ast_nodes(ast_node, source_info) # Already done above
+            # sink_nodes = self._find_ast_nodes(ast_node, sink_info) # Already done above
+
+            self.logger.print_console(f"Source nodes found: {len(source_nodes)}", "debug")
+            self.logger.print_console(f"Sink nodes found: {len(sink_nodes)}", "debug")
+            
+            if self._simple_taint_analysis(source_nodes, sink_nodes, ast_node):
+                self.logger.print_console(f"Vulnerability VALIDATED for method '{func_name}' in {target_file_path}", "info")
+                
+            report = BugReport(
+                    cwe_id=self.bug_type,
+                    file_path=target_file_path,
+                    function_name=func_name,
+                    start_line=start_line,
+                    end_line=end_line,
+                    explanation=str(vul_hypo_dict),
+                    details={"taint_source_info": source_info, "taint_sink_info": sink_info}
+                )
+                report_path = Path("reports") / self.bug_type
+                report_path.mkdir(parents=True, exist_ok=True)
+                report_file = report_path / f"{func_name.replace(' ', '_')}-{self.bug_type}.json"
+                report.dump(report_file.parent, report_file.name)
+                self.logger.print_console(f"Bug report for '{func_name}' saved to {report_file}", "info")
+        else:
+                self.logger.print_console(f"Hypothesis NOT validated for method '{func_name}'.", "info")
+        
+        self.logger.print_console("Concolic agent has finished analyzing all methods.", "info")
 
     def run(self):
-        if self.target_function:
-            self.logger.print_console(f"Start Concolic Scanning for function '{self.target_function}'...")
-        else:
-            self.logger.print_console(f"Start Concolic Scanning for all functions...")
-
-        analyzer = self._get_analyzer()
-        if not analyzer: return
-
-        if self.target_function:
-            functions_to_analyze = [analyzer.find_function_by_name(self.target_function)]
-            if not functions_to_analyze[0]:
-                self.logger.print_console(f"Target function '{self.target_function}' not found.")
-                return
-        else:
-            functions_to_analyze = analyzer.function_env.values()
-        
-        vulnerability_found_count = 0
-        
-        for func_info in functions_to_analyze:
-            if not func_info: continue
-
-            self.logger.print_console(f"Analyzing function: {func_info.function_name} in {func_info.file_path}")
-
-            self.logger.print_console(f"Generating vulnerability hypothesis for: {func_info.function_name}")
-            llm_output = self.hypothesis_generator.generate(function_code=func_info.function_code)
-            
-            if not llm_output.is_valid:
-                self.logger.print_console(f"Hypothesis generation failed: {llm_output.error_message}", "error")
-                continue
-            
-            hypothesis_json = llm_output.output
-            vulnerability_hypothesis = hypothesis_json.get('vulnerability_hypothesis', '')
-
-            if not vulnerability_hypothesis:
-                self.logger.print_console(f"Hypothesis generation failed for function '{func_info.function_name}': Hypothesis is empty.")
-                continue
-            
-            self.logger.print_console("Generating Semgrep rule...")
-            semgrep_rule_str = self.semgrep_generator.generate(
-                function_code=func_info.function_code,
-                vulnerability_hypothesis=vulnerability_hypothesis
-            )
-            if not semgrep_rule_str:
-                self.logger.print_console("Semgrep rule generation failed.", "error")
-                continue
-            
-            semgrep_rule = self.semgrep_generator.get_rule(semgrep_rule_str)
-            if not semgrep_rule:
-                self.logger.print_console(f"Skipping Semgrep validation for function '{func_info.function_name}' due to rule generation failure.")
-                continue
-
-            self.logger.print_console(f"Forcing Semgrep validation on {func_info.file_path}...")
-            semgrep_results = self._run_semgrep_validation(semgrep_rule, func_info.file_path)
-
-            if semgrep_results:
-                self.logger.print_console(f"Hypothesis VALIDATED for function '{func_info.function_name}'! Vulnerability confirmed.")
-                vulnerability_found_count += 1
-                
-                # Defensive coding for report generation
-                cwe_id = "CWE-UNKNOWN"
-                if isinstance(hypothesis_json, dict):
-                    cwe_id = hypothesis_json.get("CWE_ID", "CWE-UNKNOWN")
-                
-                report_details = {
-                    "semgrep_findings": semgrep_results.get("results", [])
-                }
-
-                report = BugReport(
-                    cwe_id=cwe_id,
-                    file_path=func_info.file_path,
-                    function_name=func_info.function_name,
-                    start_line=func_info.start_line_number,
-                    end_line=func_info.end_line_number,
-                    function_code=func_info.function_code,
-                    language=self.language,
-                    details=report_details
-                )
-                report.dump(self.result_dir, f"bug_report_{func_info.function_name}.json")
-            else:
-                self.logger.print_console(f"Hypothesis REJECTED for function '{func_info.function_name}'.")
-
-        self.logger.print_console(f"Scan finished. {vulnerability_found_count} bug(s) were detected.")
+        pass
 
     def get_agent_state(self):
         return None
 
-# Add a check for the existence of semgrep directory
-if not Path("src/semgrep").exists():
-    # This is a fallback for the ModuleNotFoundError, not a perfect solution
-    class SemgrepAnalyzer:
-        def __init__(self, *args, **kwargs): pass
-        def run_semgrep_for_cwe(self, *args, **kwargs): return []
-else:
-    from src.semgrep.semgrep_analyzer import SemgrepAnalyzer 
+# Ensure necessary directories exist
+Path("src/semgrep").mkdir(exist_ok=True)
+Path("src/semgrep_rules").mkdir(exist_ok=True) 

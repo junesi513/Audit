@@ -1,15 +1,38 @@
+from os import path
+import sys
+
+sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
+from src.tstool.analyzer.ts_analyzer import *
 from src.memory.syntactic.function import *
 from src.memory.syntactic.value import *
 from src.memory.report.bug_report import *
 from src.memory.semantic.state import *
-from src.tstool.analyzer.TS_analyzer import *
 from typing import List, Tuple, Dict
 
 
 class DFBScanState(State):
-    def __init__(self, src_values: List[Value], sink_values: List[Value]) -> None:
-        self.src_values = src_values
-        self.sink_values = sink_values
+    def __init__(self, **kwargs) -> None:
+        # Dynamically set attributes from kwargs
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+        # Initialize core attributes if they weren't provided
+        if not hasattr(self, 'src_values'):
+            self.src_values = []
+        if not hasattr(self, 'sink_values'):
+            self.sink_values = []
+        if not hasattr(self, 'potential_buggy_paths'):
+            self.potential_buggy_paths = {}
+        if not hasattr(self, 'bug_reports'):
+            self.bug_reports = {}
+        if not hasattr(self, 'total_bug_count'):
+            self.total_bug_count = 0
+        
+        # For concolic agent state tracking
+        if not hasattr(self, 'history'):
+            self.history = []
+        if not hasattr(self, 'validated'):
+            self.validated = False
 
         self.reachable_values_per_path: Dict[
             Tuple[Value, CallContext], List[Set[Tuple[Value, CallContext]]]
@@ -18,12 +41,11 @@ class DFBScanState(State):
             Tuple[Value, CallContext], Set[Tuple[Value, CallContext]]
         ] = {}
 
-        self.potential_buggy_paths: Dict[Value, Dict[str, List[Value]]] = (
-            {}
-        )  # src value -> {path_str -> path}
-        self.bug_reports: dict[int, List[BugReport]] = {}
-        self.total_bug_count = 0
-        return
+    def add_hypothesis(self, hypothesis: str):
+        self.history.append({'type': 'hypothesis', 'content': hypothesis})
+
+    def set_validated(self):
+        self.validated = True
 
     def update_reachable_values_per_path(
         self, start: Tuple[Value, CallContext], ends: Set[Tuple[Value, CallContext]]
